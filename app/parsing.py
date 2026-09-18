@@ -22,6 +22,7 @@ from __future__ import annotations
 import base64
 import email
 import re
+from email.header import decode_header, make_header
 from email.message import Message
 from email.utils import parsedate_to_datetime
 from typing import Any, Optional
@@ -245,10 +246,26 @@ def _to_record(fields: dict[str, str], source: str, extra_id: str,
     }
 
 
+def decode_mime_header(raw: str) -> str:
+    """Decode an RFC 2047 encoded-word header value (e.g. '=?utf-8?q?...?='
+    used by mail clients to carry non-ASCII characters, such as Italian
+    accents, in headers like Subject) into plain text. A header that
+    isn't MIME-encoded is returned unchanged. Without this, parse_subject
+    would silently fail to match against the raw encoded-word form -
+    matching poller.py's own decode_mime_words(), kept here too so this
+    module works standalone on whatever msg.get('Subject') returns."""
+    if not raw:
+        return ""
+    try:
+        return str(make_header(decode_header(raw)))
+    except Exception:
+        return raw
+
+
 def parse_eml_bytes(raw_bytes: bytes, source: str) -> list[dict[str, Any]]:
     """Parse a raw .eml message (as bytes) into a list of report records."""
     msg: Message = email.message_from_bytes(raw_bytes)
-    subject = msg.get("Subject", "") or ""
+    subject = decode_mime_header(msg.get("Subject", "") or "")
     date_header = msg.get("Date", "") or ""
     subj_parsed = parse_subject(subject)
 

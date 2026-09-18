@@ -97,6 +97,13 @@
   .cell-time,.cell-dest,.cell-size{font-family:'IBM Plex Mono',monospace; font-size:12px; color:var(--text-muted); white-space:nowrap;}
   .cell-user{font-weight:600;}
   .cell-status{color:var(--text-muted); font-size:12.5px; max-width:340px;}
+  .report-row{cursor:pointer;}
+  .expand-caret{display:inline-block; width:12px; color:var(--text-faint); font-size:10px;}
+  .detail-row td{background:var(--panel-2); padding:14px 20px; border-bottom:1px solid var(--border);}
+  .detail-grid{display:grid; grid-template-columns:auto 1fr; gap:6px 16px; margin:0;}
+  .detail-grid dt{font-size:11px; color:var(--text-faint); white-space:nowrap;}
+  .detail-grid dd{margin:0; font-size:12.5px; color:var(--text);}
+  .detail-grid dd.mono{font-family:'IBM Plex Mono', monospace; font-size:12px;}
   .empty-state{padding:50px 20px; text-align:center; color:var(--text-faint);}
 </style>
 </head>
@@ -154,6 +161,7 @@
   let activeSender = '';
   let currentSenders = [];
   let sortDir = 'desc'; // 'desc' = più recenti prima, 'asc' = più vecchi prima
+  let expandedKeys = new Set();
 
   document.querySelectorAll('.chip').forEach(chip=>{
     chip.addEventListener('click', ()=>{
@@ -259,17 +267,40 @@
     empty.style.display = 'none';
 
     function rowHtml(r){
-      return `
-        <tr>
+      const key = r.natural_key;
+      const isOpen = expandedKeys.has(key);
+      const colSpanCount = groupBySender ? 6 : 7;
+      let html = `
+        <tr class="report-row" data-key="${escapeHtml(key)}">
           <td><span class="sev-label ${r.severity}">${sevLabelIt(r.severity)}</span></td>
           <td class="cell-time">${escapeHtml(formatTs(r.timestamp))}</td>
           ${groupBySender ? '' : `<td class="cell-user">${escapeHtml(r.user||'—')}</td>`}
           <td>${escapeHtml(r.backup_set||'—')}</td>
           <td class="cell-dest">${escapeHtml(r.destination||'—')}</td>
-          <td class="cell-status">${escapeHtml(truncate(r.status,80))}</td>
+          <td class="cell-status">
+            <span class="expand-caret">${isOpen ? '▾' : '▸'}</span>
+            ${escapeHtml(truncate(r.status,80))}
+          </td>
           <td class="cell-size">${escapeHtml(r.data_size||'—')}</td>
         </tr>
       `;
+      if(isOpen){
+        html += `
+          <tr class="detail-row" data-key="${escapeHtml(key)}">
+            <td colspan="${colSpanCount}">
+              <dl class="detail-grid">
+                <dt>Stato completo</dt><dd>${escapeHtml(r.status||'—')}</dd>
+                <dt>Mittente</dt><dd class="mono">${escapeHtml(r.sender||'—')}</dd>
+                <dt>Periodo</dt><dd class="mono">${escapeHtml(r.start_end||'—')}</dd>
+                <dt>Indirizzo IP</dt><dd class="mono">${escapeHtml(r.ip_address||'—')}</dd>
+                <dt>Job ID</dt><dd class="mono">${escapeHtml(r.job_id||'—')}</dd>
+                <dt>Sorgente</dt><dd>${escapeHtml(r.source||'—')}</dd>
+              </dl>
+            </td>
+          </tr>
+        `;
+      }
+      return html;
     }
 
     if(!groupBySender){
@@ -295,6 +326,19 @@
       ${groups.get(sender).map(rowHtml).join('')}
     `).join('');
   }
+
+  // Delegated click handler: attached once to the (persistent) tableBody
+  // container, so it keeps working after every render() replaces its
+  // innerHTML (re-attaching a listener to each row every render would
+  // also work, but this is simpler and cheaper).
+  document.getElementById('tableBody').addEventListener('click', (e)=>{
+    const row = e.target.closest('.report-row');
+    if(!row) return;
+    const key = row.dataset.key;
+    if(expandedKeys.has(key)) expandedKeys.delete(key);
+    else expandedKeys.add(key);
+    render();
+  });
 
   load();
   setInterval(load, 60000);

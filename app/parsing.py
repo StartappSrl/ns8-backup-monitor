@@ -408,8 +408,20 @@ def parse_email_message(raw_bytes: bytes, source: str) -> list[dict[str, Any]]:
     which the HTML body never carries at all (only the PDF's "Backup
     Logs" table has it), so it's merged into the winning HTML-body record
     rather than lost whenever both a body and a matching PDF record exist
-    for the same destination, which is the common case."""
+    for the same destination, which is the common case.
+
+    PDF attachments are only opened and parsed for records whose severity
+    (already known from the subject/HTML body at this point) is WARNING
+    or CRITICAL. Extracting text from a PDF is far slower than parsing
+    the HTML body or subject, and log_excerpt only exists to explain a
+    problem - for the (typically large majority of) plain "OK" reports
+    there is nothing worth extracting, so skipping them here is a large,
+    safe speedup with no loss of anything the dashboard actually shows.
+    """
     records = parse_eml_bytes(raw_bytes, source)
+
+    if not any(r["severity"] in ("WARNING", "CRITICAL") for r in records):
+        return records
 
     msg: Message = email.message_from_bytes(raw_bytes)
     for part in msg.walk():

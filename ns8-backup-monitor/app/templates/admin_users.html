@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Utenti — Backup Monitor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#F2F4F7; --panel:#FFFFFF; --panel-2:#F8F9FB; --border:#DDE2E9;
+    --text:#1B222C; --text-muted:#5B6472; --accent:#3B6FD1; --error:#C43D3D; --error-bg:#FBEAEA;
+    --ok:#237A50; --ok-bg:#E6F5EC;
+    font-family:'IBM Plex Sans', Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#12161D; --panel:#1A2029; --panel-2:#1F2530; --border:#2A313D;
+      --text:#E7ECF2; --text-muted:#9AA4B2; --accent:#6C97F5; --error:#F0555C; --error-bg:#3A1E20;
+      --ok:#3ED98B; --ok-bg:#163A29;
+    }
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0; background:var(--bg); color:var(--text);}
+  .mono{font-family:'IBM Plex Mono', monospace;}
+  header{border-bottom:1px solid var(--border); background:var(--panel); padding:16px 24px; display:flex; align-items:center; justify-content:space-between;}
+  .brand{display:flex; align-items:center; gap:10px;}
+  .brand-mark{width:30px; height:30px; border-radius:7px; background:linear-gradient(135deg, var(--accent), #7756D9); display:flex; align-items:center; justify-content:center; color:white; font-weight:700; font-size:13px;}
+  .brand h1{font-size:15px; margin:0; font-weight:600;}
+  nav a{color:var(--text-muted); text-decoration:none; font-size:13px; margin-left:16px;}
+  main{max-width:800px; margin:0 auto; padding:24px; display:flex; flex-direction:column; gap:20px;}
+  .panel{background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:20px;}
+  h2{font-size:14px; margin:0 0 16px 0;}
+  label{display:block; font-size:12.5px; color:var(--text-muted); margin:12px 0 6px;}
+  input[type=text], input[type=password]{width:100%; padding:9px 11px; border-radius:7px; border:1px solid var(--border); background:var(--panel-2); color:var(--text); font-size:13.5px; font-family:inherit;}
+  .checkbox-row{display:flex; align-items:center; gap:8px; margin-top:14px; font-size:13px;}
+  .form-row{display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end;}
+  .form-row > div{flex:1; min-width:180px;}
+  button{padding:9px 16px; border:none; border-radius:7px; background:var(--accent); color:white; font-weight:600; font-size:13px; cursor:pointer; margin-top:16px;}
+  table{width:100%; border-collapse:collapse; font-size:13px;}
+  th{text-align:left; font-size:11px; color:var(--text-muted); padding:8px 10px; border-bottom:1px solid var(--border);}
+  td{padding:10px; border-bottom:1px solid var(--border); vertical-align:middle;}
+  .badge{font-size:11px; font-weight:600; padding:2px 8px; border-radius:5px;}
+  .badge.admin{background:var(--ok-bg); color:var(--ok);}
+  .badge.you{background:var(--panel-2); color:var(--text-muted); margin-left:6px;}
+  .delete-btn{background:transparent; color:var(--error); border:1px solid var(--error); padding:5px 10px; font-size:12px; margin:0;}
+  .error{margin-top:14px; padding:10px 12px; border-radius:7px; background:var(--error-bg); color:var(--error); font-size:12.5px;}
+  .totp-box{margin-top:14px; padding:14px; border-radius:7px; background:var(--ok-bg); color:var(--text); font-size:12.5px;}
+  .totp-box .k{color:var(--text-muted); font-size:11px; text-transform:uppercase; letter-spacing:0.03em; margin-top:8px;}
+  .totp-box .v{word-break:break-all;}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <div class="brand-mark">BM</div>
+    <h1>Gestione utenti</h1>
+  </div>
+  <nav>
+    <a href="{{ url_for('dashboard') }}">Report</a>
+  </nav>
+</header>
+
+<main>
+
+  {% if new_user_totp %}
+  <div class="panel totp-box">
+    <strong>Utente "{{ new_user_totp.username }}" creato.</strong> Comunicagli questi dati: dovrà aggiungerli alla sua app di autenticazione prima di poter accedere.
+    <div class="k">Codice segreto</div>
+    <div class="v mono">{{ new_user_totp.totp_secret }}</div>
+    <div class="k">URI di provisioning</div>
+    <div class="v mono">{{ new_user_totp.totp_uri }}</div>
+  </div>
+  {% endif %}
+
+  {% if error == "invalid_input" %}
+    <div class="panel error">Nome utente mancante o password troppo corta (minimo 8 caratteri).</div>
+  {% elif error == "username_taken" %}
+    <div class="panel error">Questo nome utente esiste già.</div>
+  {% elif error == "cannot_delete_self" %}
+    <div class="panel error">Non puoi eliminare il tuo stesso account.</div>
+  {% elif error == "last_admin" %}
+    <div class="panel error">Non puoi eliminare l'ultimo amministratore rimasto.</div>
+  {% endif %}
+
+  <div class="panel">
+    <h2>Aggiungi utente</h2>
+    <form method="post" action="{{ url_for('admin_users_create') }}">
+      <div class="form-row">
+        <div>
+          <label for="username">Nome utente</label>
+          <input type="text" id="username" name="username" required>
+        </div>
+        <div>
+          <label for="password">Password iniziale</label>
+          <input type="password" id="password" name="password" minlength="8" required>
+        </div>
+      </div>
+      <div class="checkbox-row">
+        <input type="checkbox" id="is_admin" name="is_admin">
+        <label for="is_admin" style="margin:0;">Anche amministratore (può gestire altri utenti)</label>
+      </div>
+      <button type="submit">Aggiungi utente</button>
+    </form>
+  </div>
+
+  <div class="panel">
+    <h2>Utenti esistenti</h2>
+    <table>
+      <thead>
+        <tr><th>Utente</th><th>Creato il</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for u in users %}
+        <tr>
+          <td>
+            {{ u.username }}
+            {% if u.is_admin %}<span class="badge admin">Admin</span>{% endif %}
+            {% if u.username == current_username %}<span class="badge you">Tu</span>{% endif %}
+          </td>
+          <td class="mono">{{ u.created_at }}</td>
+          <td style="text-align:right;">
+            <form method="post" action="{{ url_for('admin_users_delete', username=u.username) }}" style="display:inline;" onsubmit="return confirm('Eliminare l\'utente {{ u.username }}?');">
+              <button type="submit" class="delete-btn">Elimina</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+</main>
+</body>
+</html>

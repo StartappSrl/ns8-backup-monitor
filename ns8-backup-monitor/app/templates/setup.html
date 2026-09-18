@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Configurazione iniziale — Backup Monitor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#12161D; --panel:#1A2029; --border:#2A313D; --text:#E7ECF2;
+    --text-muted:#9AA4B2; --accent:#6C97F5; --error:#F0555C; --error-bg:#3A1E20;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;margin:0;}
+  body{
+    font-family:'IBM Plex Sans', Arial, sans-serif;
+    background:var(--bg); color:var(--text);
+    display:flex; align-items:center; justify-content:center;
+  }
+  .card{width:100%; max-width:420px; background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:32px 28px;}
+  .brand{display:flex; align-items:center; gap:10px; margin-bottom:8px;}
+  .brand-mark{
+    width:32px; height:32px; border-radius:7px;
+    background:linear-gradient(135deg, var(--accent), #7756D9);
+    display:flex; align-items:center; justify-content:center; color:white; font-weight:700; font-size:14px; flex-shrink:0;
+  }
+  .brand h1{font-size:15px; margin:0; font-weight:600;}
+  .intro{font-size:12.5px; color:var(--text-muted); margin:0 0 20px 0; line-height:1.5;}
+  label{display:block; font-size:12.5px; color:var(--text-muted); margin:16px 0 6px;}
+  input{width:100%; padding:10px 12px; border-radius:7px; border:1px solid var(--border); background:#0F1319; color:var(--text); font-size:14px; font-family:inherit;}
+  input:focus{outline:none; border-color:var(--accent);}
+  button{width:100%; margin-top:22px; padding:10px; border:none; border-radius:7px; background:var(--accent); color:#0B0E13; font-weight:600; font-size:14px; cursor:pointer;}
+  button:hover{opacity:0.92;}
+  .error{margin-top:16px; padding:10px 12px; border-radius:7px; background:var(--error-bg); color:var(--error); font-size:12.5px;}
+  .hint{font-size:11.5px; color:var(--text-muted); margin-top:6px;}
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="brand">
+      <div class="brand-mark">BM</div>
+      <h1>Backup Monitor</h1>
+    </div>
+    <p class="intro">Nessun utente configurato. Crea il primo account: sarà l'amministratore, potrà aggiungere altri utenti in seguito.</p>
+    <form method="post" action="{{ url_for('setup') }}">
+      <label for="username">Nome utente</label>
+      <input type="text" id="username" name="username" required autofocus>
+
+      <label for="password">Password</label>
+      <input type="password" id="password" name="password" minlength="8" required>
+      <div class="hint">Almeno 8 caratteri</div>
+
+      {% if error == "username_required" %}
+        <div class="error">Inserisci un nome utente.</div>
+      {% elif error == "password_too_short" %}
+        <div class="error">La password deve avere almeno 8 caratteri.</div>
+      {% endif %}
+
+      <button type="submit">Crea account amministratore</button>
+    </form>
+  </div>
+</body>
+</html>

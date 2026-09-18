@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Configura MFA — Backup Monitor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#12161D; --panel:#1A2029; --border:#2A313D; --text:#E7ECF2;
+    --text-muted:#9AA4B2; --accent:#6C97F5; --error:#F0555C; --error-bg:#3A1E20;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;margin:0;}
+  body{font-family:'IBM Plex Sans', Arial, sans-serif; background:var(--bg); color:var(--text); display:flex; align-items:center; justify-content:center;}
+  .card{width:100%; max-width:460px; background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:32px 28px;}
+  h1{font-size:16px; margin:0 0 6px 0; font-weight:600;}
+  p{font-size:12.5px; color:var(--text-muted); line-height:1.5;}
+  .secret-box{
+    background:#0F1319; border:1px solid var(--border); border-radius:7px;
+    padding:14px; margin:14px 0; font-family:'IBM Plex Mono', monospace; font-size:13px;
+    word-break:break-all;
+  }
+  .secret-box .label{font-size:10.5px; text-transform:uppercase; letter-spacing:0.04em; color:var(--text-muted); margin-bottom:4px; font-family:'IBM Plex Sans', sans-serif;}
+  label{display:block; font-size:12.5px; color:var(--text-muted); margin:18px 0 6px;}
+  input{width:100%; padding:10px 12px; border-radius:7px; border:1px solid var(--border); background:#0F1319; color:var(--text); font-size:14px; font-family:inherit;}
+  input:focus{outline:none; border-color:var(--accent);}
+  button{width:100%; margin-top:20px; padding:10px; border:none; border-radius:7px; background:var(--accent); color:#0B0E13; font-weight:600; font-size:14px; cursor:pointer;}
+  .error{margin-top:16px; padding:10px 12px; border-radius:7px; background:var(--error-bg); color:var(--error); font-size:12.5px;}
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>Configura l'autenticazione a due fattori</h1>
+    <p>Apri la tua app di autenticazione (Google Authenticator, Aegis, ecc.) e aggiungi un nuovo account inserendo manualmente questo codice segreto, oppure incollando l'URI di provisioning se la tua app lo supporta.</p>
+
+    <div class="secret-box">
+      <div class="label">Codice segreto</div>
+      {{ totp_secret }}
+    </div>
+    <div class="secret-box">
+      <div class="label">URI di provisioning</div>
+      {{ totp_uri }}
+    </div>
+
+    <p>Poi inserisci qui sotto il codice a 6 cifre generato dall'app per confermare che tutto funziona:</p>
+
+    <form method="post" action="{{ url_for('setup_verify') }}">
+      <label for="totp_code">Codice di verifica</label>
+      <input type="text" id="totp_code" name="totp_code" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" required autofocus>
+
+      {% if error == "invalid_code" %}
+        <div class="error">Codice non valido. Riprova.</div>
+      {% endif %}
+
+      <button type="submit">Conferma e accedi</button>
+    </form>
+  </div>
+</body>
+</html>

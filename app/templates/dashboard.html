@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Report backup — Backup Monitor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#F2F4F7; --panel:#FFFFFF; --panel-2:#F8F9FB; --border:#DDE2E9;
+    --text:#1B222C; --text-muted:#5B6472; --text-faint:#8A93A1; --accent:#3B6FD1;
+    --critical:#C43D3D; --critical-bg:#FBEAEA; --warning:#A9700F; --warning-bg:#FBF1DE;
+    --ok:#237A50; --ok-bg:#E6F5EC; --info:#3B6FD1; --info-bg:#EAF0FC;
+    font-family:'IBM Plex Sans', Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#12161D; --panel:#1A2029; --panel-2:#1F2530; --border:#2A313D;
+      --text:#E7ECF2; --text-muted:#9AA4B2; --text-faint:#6C7686; --accent:#6C97F5;
+      --critical:#F0555C; --critical-bg:#3A1E20; --warning:#F0AC3D; --warning-bg:#3A2E16;
+      --ok:#3ED98B; --ok-bg:#163A29; --info:#6C97F5; --info-bg:#182848;
+    }
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;background:var(--bg);color:var(--text);}
+  .mono{font-family:'IBM Plex Mono', monospace;}
+  header{
+    border-bottom:1px solid var(--border); background:var(--panel);
+    padding:16px 24px; display:flex; align-items:center; justify-content:space-between;
+  }
+  .brand{display:flex; align-items:center; gap:10px;}
+  .brand-mark{
+    width:30px; height:30px; border-radius:7px;
+    background:linear-gradient(135deg, var(--accent), #7756D9);
+    display:flex; align-items:center; justify-content:center; color:white; font-weight:700; font-size:13px;
+  }
+  .brand h1{font-size:15px; margin:0; font-weight:600;}
+  .user-box{display:flex; align-items:center; gap:12px; font-size:13px; color:var(--text-muted);}
+  .logout-btn{
+    border:1px solid var(--border); background:var(--panel-2); color:var(--text-muted);
+    padding:6px 12px; border-radius:7px; font-size:12.5px; cursor:pointer; font-family:inherit;
+  }
+  main{max-width:1180px; margin:0 auto; padding:24px; display:flex; flex-direction:column; gap:18px;}
+  .summary{display:grid; grid-template-columns:repeat(auto-fit, minmax(150px,1fr)); gap:10px;}
+  .stat{background:var(--panel); border:1px solid var(--border); border-left:3px solid var(--border); border-radius:8px; padding:14px 16px;}
+  .stat .n{font-size:22px; font-weight:700; font-family:'IBM Plex Mono',monospace;}
+  .stat .l{font-size:11.5px; color:var(--text-muted); margin-top:3px;}
+  .stat.critical{border-left-color:var(--critical);} .stat.critical .n{color:var(--critical);}
+  .stat.warning{border-left-color:var(--warning);} .stat.warning .n{color:var(--warning);}
+  .stat.ok{border-left-color:var(--ok);} .stat.ok .n{color:var(--ok);}
+  .controls{display:flex; gap:10px; flex-wrap:wrap; align-items:center; background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:10px 12px;}
+  .chip{display:flex; align-items:center; gap:6px; padding:6px 11px; border-radius:20px; border:1px solid var(--border); font-size:12.5px; cursor:pointer; background:var(--panel-2); color:var(--text-muted); user-select:none;}
+  .chip .dot{width:7px; height:7px; border-radius:50%;}
+  .chip[data-sev="CRITICAL"] .dot{background:var(--critical);}
+  .chip[data-sev="WARNING"] .dot{background:var(--warning);}
+  .chip[data-sev="OK"] .dot{background:var(--ok);}
+  .chip[data-sev="INFO"] .dot{background:var(--info);}
+  .chip[data-sev="CRITICAL"].active{background:var(--critical-bg); color:var(--critical); border-color:var(--critical);}
+  .chip[data-sev="WARNING"].active{background:var(--warning-bg); color:var(--warning); border-color:var(--warning);}
+  .chip[data-sev="OK"].active{background:var(--ok-bg); color:var(--ok); border-color:var(--ok);}
+  .chip[data-sev="INFO"].active{background:var(--info-bg); color:var(--info); border-color:var(--info);}
+  select, input[type=text]{font-family:inherit; font-size:12.5px; padding:6px 10px; border-radius:7px; border:1px solid var(--border); background:var(--panel-2); color:var(--text);}
+  .spacer{flex:1;}
+  .panel{background:var(--panel); border:1px solid var(--border); border-radius:8px; overflow:hidden;}
+  table{width:100%; border-collapse:collapse; font-size:13px;}
+  thead th{text-align:left; font-size:11px; font-weight:600; color:var(--text-faint); padding:10px 14px; border-bottom:1px solid var(--border); background:var(--panel-2); white-space:nowrap;}
+  tbody tr{border-bottom:1px solid var(--border);}
+  tbody tr:last-child{border-bottom:none;}
+  tbody tr:hover{background:var(--panel-2);}
+  tbody td{padding:11px 14px; vertical-align:top;}
+  .sev-label{font-size:11px; font-weight:600; padding:2px 8px; border-radius:5px; white-space:nowrap;}
+  .sev-label.CRITICAL{background:var(--critical-bg); color:var(--critical);}
+  .sev-label.WARNING{background:var(--warning-bg); color:var(--warning);}
+  .sev-label.OK{background:var(--ok-bg); color:var(--ok);}
+  .sev-label.INFO{background:var(--info-bg); color:var(--info);}
+  .cell-time,.cell-dest,.cell-size{font-family:'IBM Plex Mono',monospace; font-size:12px; color:var(--text-muted); white-space:nowrap;}
+  .cell-user{font-weight:600;}
+  .cell-status{color:var(--text-muted); font-size:12.5px; max-width:340px;}
+  .empty-state{padding:50px 20px; text-align:center; color:var(--text-faint);}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <div class="brand-mark">BM</div>
+    <h1>Report backup</h1>
+  </div>
+  <div class="user-box">
+    <span>{{ username }}</span>
+    {% if is_admin %}
+      <a href="{{ url_for('admin_users') }}" class="logout-btn" style="text-decoration:none;">Utenti</a>
+    {% endif %}
+    <form method="post" action="{{ url_for('logout') }}" style="margin:0;">
+      <button type="submit" class="logout-btn">Esci</button>
+    </form>
+  </div>
+</header>
+
+<main>
+  <div class="summary" id="summary"></div>
+
+  <div class="controls">
+    <div class="chip active" data-sev="CRITICAL">Critico <span class="dot"></span></div>
+    <div class="chip active" data-sev="WARNING">Attenzione <span class="dot"></span></div>
+    <div class="chip active" data-sev="OK">OK <span class="dot"></span></div>
+    <div class="chip active" data-sev="INFO">Info <span class="dot"></span></div>
+    <select id="destFilter"><option value="">Tutte le destinazioni</option></select>
+    <input type="text" id="searchBox" placeholder="Cerca utente o backup set…" />
+    <div class="spacer"></div>
+  </div>
+
+  <div class="panel">
+    <table id="reportTable" style="display:none;">
+      <thead>
+        <tr>
+          <th>Gravità</th><th>Data / ora</th><th>Utente</th><th>Backup set</th>
+          <th>Destinazione</th><th>Stato</th><th>Dati</th>
+        </tr>
+      </thead>
+      <tbody id="tableBody"></tbody>
+    </table>
+    <div class="empty-state" id="emptyState">Caricamento…</div>
+  </div>
+</main>
+
+<script>
+(function(){
+  let allReports = [];
+  let activeSevs = new Set(['CRITICAL','WARNING','OK','INFO']);
+
+  document.querySelectorAll('.chip').forEach(chip=>{
+    chip.addEventListener('click', ()=>{
+      const sev = chip.dataset.sev;
+      if(activeSevs.has(sev)){ activeSevs.delete(sev); chip.classList.remove('active'); }
+      else{ activeSevs.add(sev); chip.classList.add('active'); }
+      render();
+    });
+  });
+  document.getElementById('destFilter').addEventListener('change', render);
+  document.getElementById('searchBox').addEventListener('input', render);
+
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+  function sevLabelIt(sev){ return {CRITICAL:'Critico', WARNING:'Attenzione', OK:'OK', INFO:'Info'}[sev]; }
+  function truncate(s,n){ s=s||''; return s.length>n ? s.slice(0,n-1)+'…' : s; }
+  function formatTs(ts){
+    if(!ts) return '—';
+    const d = new Date(ts);
+    if(isNaN(d.getTime())) return ts;
+    return d.toLocaleString('it-IT', {day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
+  }
+
+  async function load(){
+    const res = await fetch('/api/reports', {credentials:'same-origin'});
+    if(res.status === 401 || res.redirected){ window.location.href = '/login'; return; }
+    const data = await res.json();
+    allReports = data.reports || [];
+    renderSummary(data.summary || {});
+    renderDestinations(data.destinations || []);
+    render();
+  }
+
+  function renderSummary(summary){
+    document.getElementById('summary').innerHTML = `
+      <div class="stat total"><div class="n">${allReports.length}</div><div class="l">Report totali</div></div>
+      <div class="stat critical"><div class="n">${summary.CRITICAL||0}</div><div class="l">Critici</div></div>
+      <div class="stat warning"><div class="n">${summary.WARNING||0}</div><div class="l">Attenzione</div></div>
+      <div class="stat ok"><div class="n">${summary.OK||0}</div><div class="l">OK</div></div>
+    `;
+  }
+  function renderDestinations(destinations){
+    const sel = document.getElementById('destFilter');
+    const current = sel.value;
+    sel.innerHTML = '<option value="">Tutte le destinazioni</option>' +
+      destinations.map(d=>`<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`).join('');
+    sel.value = destinations.includes(current) ? current : '';
+  }
+
+  function render(){
+    const q = document.getElementById('searchBox').value.trim().toLowerCase();
+    const destVal = document.getElementById('destFilter').value;
+    const filtered = allReports.filter(r=>{
+      if(!activeSevs.has(r.severity)) return false;
+      if(destVal && r.destination !== destVal) return false;
+      if(q && !((r.user||'').toLowerCase().includes(q) || (r.backup_set||'').toLowerCase().includes(q))) return false;
+      return true;
+    });
+    filtered.sort((a,b)=> new Date(b.timestamp||0) - new Date(a.timestamp||0));
+
+    const table = document.getElementById('reportTable');
+    const empty = document.getElementById('emptyState');
+    if(filtered.length === 0){
+      table.style.display = 'none';
+      empty.style.display = 'block';
+      empty.textContent = allReports.length ? 'Nessun report corrisponde ai filtri.' : 'Nessun report ricevuto finora.';
+    } else {
+      table.style.display = 'table';
+      empty.style.display = 'none';
+      document.getElementById('tableBody').innerHTML = filtered.map(r => `
+        <tr>
+          <td><span class="sev-label ${r.severity}">${sevLabelIt(r.severity)}</span></td>
+          <td class="cell-time">${escapeHtml(formatTs(r.timestamp))}</td>
+          <td class="cell-user">${escapeHtml(r.user||'—')}</td>
+          <td>${escapeHtml(r.backup_set||'—')}</td>
+          <td class="cell-dest">${escapeHtml(r.destination||'—')}</td>
+          <td class="cell-status">${escapeHtml(truncate(r.status,80))}</td>
+          <td class="cell-size">${escapeHtml(r.data_size||'—')}</td>
+        </tr>
+      `).join('');
+    }
+  }
+
+  load();
+  setInterval(load, 60000);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "list-reports input",
+    "$id": "http://schema.nethserver.org/backup-monitor/list-reports-input.json",
+    "description": "Optional filters for the stored backup reports",
+    "type": "object",
+    "properties": {
+        "severity": {
+            "type": "array",
+            "items": {"type": "string", "enum": ["CRITICAL", "WARNING", "OK", "INFO"]}
+        },
+        "destination": {"type": "string"},
+        "search": {"type": "string"}
+    }
+}

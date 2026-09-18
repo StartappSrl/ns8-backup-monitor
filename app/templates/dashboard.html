@@ -75,7 +75,13 @@
   select, input[type=text]{font-family:inherit; font-size:12.5px; padding:6px 10px; border-radius:7px; border:1px solid var(--border); background:var(--panel-2); color:var(--text);}
   .spacer{flex:1;}
   .panel{background:var(--panel); border:1px solid var(--border); border-radius:8px; overflow-x:auto;}
-  table{width:100%; border-collapse:collapse; font-size:13px;}
+  table{width:100%; border-collapse:collapse; font-size:13px; table-layout:fixed;}
+  .col-sev{width:92px;}
+  .col-time{width:132px;}
+  .col-user{width:110px;}
+  .col-backupset{width:160px;}
+  .col-dest{width:130px;}
+  .col-size{width:72px;}
   thead th{text-align:left; font-size:11px; font-weight:600; color:var(--text-faint); padding:10px 14px; border-bottom:1px solid var(--border); background:var(--panel-2); white-space:nowrap;}
   thead th.sortable{cursor:pointer; user-select:none;}
   thead th.sortable:hover{color:var(--text);}
@@ -94,10 +100,10 @@
   .sev-label.WARNING{background:var(--warning-bg); color:var(--warning);}
   .sev-label.OK{background:var(--ok-bg); color:var(--ok);}
   .sev-label.INFO{background:var(--info-bg); color:var(--info);}
-  .cell-time,.cell-dest,.cell-size{font-family:'IBM Plex Mono',monospace; font-size:12px; color:var(--text-muted); white-space:nowrap;}
-  .cell-user{font-weight:600;}
-  .cell-status{color:var(--text-muted); font-size:12.5px; max-width:340px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
-  .cell-backupset{max-width:220px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .cell-time,.cell-dest,.cell-size{font-family:'IBM Plex Mono',monospace; font-size:12px; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .cell-user{font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .cell-status{color:var(--text-muted); font-size:12.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .cell-backupset{white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
   .report-row{cursor:pointer;}
   .expand-caret{display:inline-block; width:12px; color:var(--text-faint); font-size:10px;}
   .detail-row td{background:var(--panel-2); padding:14px 20px; border-bottom:1px solid var(--border);}
@@ -255,10 +261,10 @@
 
     const groupBySender = currentSenders.length > 1 && !activeSender;
     const headRow = document.getElementById('tableHeadRow');
-    headRow.innerHTML = '<th>Gravità</th>' +
-      `<th class="sortable" id="dateHeader">Data / ora <span class="sort-arrow">${sortDir === 'desc' ? '▾' : '▴'}</span></th>` +
-      (groupBySender ? '' : '<th>Utente</th>') +
-      '<th>Backup set</th><th>Destinazione</th><th>Stato</th><th>Dati</th>';
+    headRow.innerHTML = '<th class="col-sev">Gravità</th>' +
+      `<th class="sortable col-time" id="dateHeader">Data / ora <span class="sort-arrow">${sortDir === 'desc' ? '▾' : '▴'}</span></th>` +
+      (groupBySender ? '' : '<th class="col-user">Utente</th>') +
+      '<th class="col-backupset">Backup set</th><th class="col-dest">Destinazione</th><th class="col-status">Stato</th><th class="col-size">Dati</th>';
     document.getElementById('dateHeader').addEventListener('click', ()=>{
       sortDir = sortDir === 'desc' ? 'asc' : 'desc';
       render();

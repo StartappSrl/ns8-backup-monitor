@@ -192,6 +192,7 @@ def create_app() -> Flask:
 
         severities = request.args.getlist("severity")
         destination = request.args.get("destination") or ""
+        sender = request.args.get("sender") or ""
         search = request.args.get("search") or ""
 
         query = "SELECT * FROM reports WHERE 1=1"
@@ -204,6 +205,9 @@ def create_app() -> Flask:
         if destination:
             query += " AND destination = ?"
             params.append(destination)
+        if sender:
+            query += " AND sender = ?"
+            params.append(sender)
         if search:
             query += " AND (user LIKE ? OR backup_set LIKE ?)"
             like = f"%{search}%"
@@ -213,16 +217,43 @@ def create_app() -> Flask:
 
         rows = [dict(r) for r in db.execute(query, params).fetchall()]
 
+        # Summary and the destinations list are scoped to the selected sender
+        # "panel" (if any), so switching sender tabs really behaves like
+        # switching to a dedicated view for that sender - but not to the
+        # severity/destination/search filters, so those counters stay a
+        # useful "how many would show up if I cleared severity/search".
+        scope_query_suffix = ""
+        scope_params: list = []
+        if sender:
+            scope_query_suffix = " AND sender = ?"
+            scope_params = [sender]
+
         summary = {"CRITICAL": 0, "WARNING": 0, "OK": 0, "INFO": 0}
-        for row in db.execute("SELECT severity, COUNT(*) AS n FROM reports GROUP BY severity"):
+        for row in db.execute(
+            f"SELECT severity, COUNT(*) AS n FROM reports WHERE 1=1{scope_query_suffix} GROUP BY severity",
+            scope_params,
+        ):
             summary[row["severity"]] = row["n"]
 
         destinations = [
             r["destination"] for r in
-            db.execute("SELECT DISTINCT destination FROM reports WHERE destination != '' ORDER BY destination")
+            db.execute(
+                f"SELECT DISTINCT destination FROM reports WHERE destination != ''{scope_query_suffix} ORDER BY destination",
+                scope_params,
+            )
         ]
 
-        return jsonify({"reports": rows, "summary": summary, "destinations": destinations})
+        # The senders list itself is always unscoped, so every tab stays
+        # visible regardless of which one is currently selected.
+        senders = [
+            r["sender"] for r in
+            db.execute("SELECT DISTINCT sender FROM reports WHERE sender IS NOT NULL AND sender != '' ORDER BY sender")
+        ]
+
+        return jsonify({
+            "reports": rows, "summary": summary,
+            "destinations": destinations, "senders": senders,
+        })
 
     @app.route("/healthz")
     def healthz():

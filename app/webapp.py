@@ -213,7 +213,14 @@ def create_app() -> Flask:
             like = f"%{search}%"
             params.extend([like, like])
 
-        query += " ORDER BY received_at DESC LIMIT 500"
+        # LIMIT is generous on purpose: during a large historical
+        # reprocessing run (e.g. right after adding a new folder or
+        # sender), thousands of never-before-seen messages get inserted
+        # in a burst with a fresh received_at each - a small limit would
+        # make the dashboard appear to "lose" reports from a folder that
+        # just finished as soon as the next folder's messages start
+        # arriving, rather than showing everything accumulated so far.
+        query += " ORDER BY received_at DESC LIMIT 5000"
 
         rows = [dict(r) for r in db.execute(query, params).fetchall()]
 
@@ -221,7 +228,7 @@ def create_app() -> Flask:
         # "panel" (if any), so switching sender tabs really behaves like
         # switching to a dedicated view for that sender - but not to the
         # severity/destination/search filters, so those counters stay a
-        # useful "how many would show up if I cleared severity/search".
+        # useful "how many would show up if I cleared severity/search"
         scope_query_suffix = ""
         scope_params: list = []
         if sender:

@@ -219,7 +219,8 @@ def _clean_key_part(s: str) -> str:
 
 
 def _to_record(fields: dict[str, str], source: str, extra_id: str,
-               subj_parsed: Optional[dict[str, str]]) -> dict[str, Any]:
+               subj_parsed: Optional[dict[str, str]],
+               log_excerpt: str = "") -> dict[str, Any]:
     status = fields.get("Job Status") or (subj_parsed or {}).get("status", "") or ""
     start_end = fields.get("Start - End", "")
     raw_timestamp = (
@@ -243,6 +244,7 @@ def _to_record(fields: dict[str, str], source: str, extra_id: str,
         "start_end": start_end,
         "job_id": fields.get("Backup Job") or (subj_parsed or {}).get("jobId", "") or "",
         "severity": classify_severity(status),
+        "log_excerpt": log_excerpt,
     }
 
 
@@ -297,6 +299,59 @@ def parse_eml_bytes(raw_bytes: bytes, source: str) -> list[dict[str, Any]]:
     ]
 
 
+_LOG_LINE_START_RE = re.compile(
+    r"^(\d+)\s+(info|error|warn|warning|debug)\s+(\S+\s+\S+)\s+(.*)$",
+    re.IGNORECASE,
+)
+_LOG_INTERESTING_KEYS = [
+    "error", "fail", "warn", "exception", "timeout", "denied", "retry",
+    "could not", "unable", "corrupt",
+]
+
+
+def extract_log_excerpt(raw_text: str, max_chars: int = 2000) -> str:
+    """Pull out the 'interesting' (non-routine) lines from the numbered
+    "Backup Logs" table found in 1Backup/CoreTech PDF reports - the
+    detailed retry/timeout/error lines that never appear anywhere else
+    in the report (the header fields only carry a short overall status
+    like "OK" or "Storage Quota Exceeded", not the underlying cause).
+
+    PDF text extraction wraps a single logical log line across several
+    physical text lines mid-sentence (e.g. a long exception message), so
+    this reassembles each numbered entry (recognized by its "N info/
+    error/warn TIMESTAMP ..." prefix) before filtering, rather than
+    filtering line-by-line - otherwise a wrapped continuation line with
+    no prefix of its own would be silently dropped even if the entry it
+    belongs to is relevant.
+    """
+    m = re.search(r"Backup Logs\b(.*?)(?:\nBackup Files\b|\Z)", raw_text, re.DOTALL)
+    if not m:
+        return ""
+    section = m.group(1)
+
+    entries: list[str] = []
+    current: Optional[str] = None
+    for line in section.split("\n"):
+        line = line.rstrip()
+        if not line.strip():
+            continue
+        start_match = _LOG_LINE_START_RE.match(line.strip())
+        if start_match:
+            if current:
+                entries.append(current)
+            current = start_match.group(0)
+        elif current is not None:
+            current = current.rstrip() + " " + line.strip()
+    if current:
+        entries.append(current)
+
+    interesting = [e for e in entries if any(k in e.lower() for k in _LOG_INTERESTING_KEYS)]
+    text = "\n".join(re.sub(r"\s+", " ", e).strip() for e in interesting)
+    if len(text) > max_chars:
+        text = text[:max_chars].rstrip() + "…"
+    return text
+
+
 def parse_pdf_bytes(raw_bytes: bytes, source: str) -> list[dict[str, Any]]:
     """Parse a PDF attachment's text into a list of report records."""
     try:
@@ -305,34 +360,81 @@ def parse_pdf_bytes(raw_bytes: bytes, source: str) -> list[dict[str, Any]]:
         return []
 
     import io
-    reader = PdfReader(io.BytesIO(raw_bytes))
-    lines: list[str] = []
-    for page in reader.pages:
-        text = page.extract_text() or ""
-        lines.extend(text.split("\n"))
+    try:
+        reader = PdfReader(io.BytesIO(raw_bytes))
+        lines: list[str] = []
+        for page in reader.pages:
+            text = page.extract_text() or ""
+            lines.extend(text.split("\n"))
+    except Exception:
+        # A misidentified or corrupt attachment shouldn't take down parsing
+        # of the rest of the email - the HTML body (if any) still stands.
+        return []
 
-    blocks = extract_records_from_text("\n".join(lines))
-    return [_to_record(fields, source, str(idx), None) for idx, fields in enumerate(blocks)]
+    full_text = "\n".join(lines)
+    blocks = extract_records_from_text(full_text)
+    log_excerpt = extract_log_excerpt(full_text)
+    return [
+        _to_record(fields, source, str(idx), None, log_excerpt=log_excerpt)
+        for idx, fields in enumerate(blocks)
+    ]
+
+
+def _find_matching_record(records: list[dict[str, Any]], pdf_destination: str) -> Optional[dict[str, Any]]:
+    """Find the HTML-body record this PDF-derived record corresponds to.
+
+    The PDF's Destination field carries a longer form than the HTML
+    body's (e.g. body "DC2-1Backup" vs PDF "DC2-1Backup (Predefined
+    Destination)", body "1Backup" vs PDF "1Backup (1Backup)"), so an
+    exact string match on destination would silently fail for every
+    email that has both a body and a PDF - which is the common case.
+    Falls back to a prefix check in either direction.
+    """
+    for r in records:
+        d = r["destination"]
+        if d == pdf_destination:
+            return r
+    for r in records:
+        d = r["destination"]
+        if d and (pdf_destination.startswith(d) or d.startswith(pdf_destination)):
+            return r
+    return None
 
 
 def parse_email_message(raw_bytes: bytes, source: str) -> list[dict[str, Any]]:
     """Parse an email, combining records found in its HTML body AND in any
     PDF attachments, de-duplicated by natural_key (HTML-body records win,
-    since they are generally cleaner to parse)."""
+    since they are generally cleaner to parse) - EXCEPT for log_excerpt,
+    which the HTML body never carries at all (only the PDF's "Backup
+    Logs" table has it), so it's merged into the winning HTML-body record
+    rather than lost whenever both a body and a matching PDF record exist
+    for the same destination, which is the common case."""
     records = parse_eml_bytes(raw_bytes, source)
 
     msg: Message = email.message_from_bytes(raw_bytes)
     for part in msg.walk():
-        if part.get_content_type() == "application/pdf":
+        # Only treat this as a PDF if it genuinely has a filename ending
+        # in .pdf, or a declared application/pdf type - NOT if it simply
+        # lacks a filename (e.g. the HTML body part itself has none, and
+        # defaulting that case to a made-up "attachment.pdf" name would
+        # wrongly match the .pdf-suffix check below and try to parse the
+        # HTML body's raw bytes as a PDF).
+        real_filename = part.get_filename() or ""
+        is_pdf = (
+            part.get_content_type() == "application/pdf"
+            or real_filename.lower().endswith(".pdf")
+        )
+        if is_pdf:
             payload = part.get_payload(decode=True)
             if not payload:
                 continue
-            filename = part.get_filename() or "attachment.pdf"
+            filename = real_filename or "attachment.pdf"
             pdf_records = parse_pdf_bytes(payload, f"{source}::{filename}")
-            existing_keys = {r["destination"] for r in records}
             for r in pdf_records:
-                if r["destination"] not in existing_keys:
+                existing = _find_matching_record(records, r["destination"])
+                if existing is None:
                     records.append(r)
-                    existing_keys.add(r["destination"])
+                elif not existing.get("log_excerpt") and r.get("log_excerpt"):
+                    existing["log_excerpt"] = r["log_excerpt"]
 
     return records

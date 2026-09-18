@@ -14,6 +14,7 @@ on:
 jobs:
   run:
     name: "Run tests"
+    permissions: issues: write pull-requests: write statuses: write contents: read actions: read
     uses: NethServer/ns8-github-actions/.github/workflows/test-module.yml@v1
     with:
       ui_tests_strategy: on_renovate_ui_change

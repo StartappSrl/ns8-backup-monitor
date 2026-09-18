@@ -50,7 +50,7 @@ buildah run \
 buildah add "${container}" imageroot /imageroot
 buildah add "${container}" ui/dist /ui
 buildah config --entrypoint=/ \
-    --label="org.nethserver.images=${repobase}/${pollerimage}" \
+    --label="org.nethserver.images=${repobase}/${pollerimage}:latest" \
     --label="org.nethserver.rootfull=0" \
     --label="org.nethserver.tcp-ports-demand=0" \
     "${container}"

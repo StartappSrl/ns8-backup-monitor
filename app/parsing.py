@@ -177,11 +177,40 @@ def parse_subject(subject: str) -> Optional[dict[str, str]]:
     }
 
 
+def normalize_timestamp(raw: str) -> str:
+    """Normalize the two date formats seen in these reports into a single
+    sortable ISO 8601 string (YYYY-MM-DDTHH:MM:SS), so the dashboard can
+    reliably sort/compare dates regardless of which field they came from:
+
+      - "17/09/2026 23:10:22 CEST"  (from the "Start - End" field)
+      - "2026-09-17-23-00-00"       (from the "Backup Job" field, used as
+                                      a fallback when Start - End is absent)
+
+    Anything not matching either pattern is returned unchanged.
+    """
+    raw = (raw or "").strip()
+    if not raw:
+        return ""
+
+    m = re.match(r"^(\d{2})/(\d{2})/(\d{4})\s+(\d{2}):(\d{2}):(\d{2})", raw)
+    if m:
+        day, month, year, hh, mm, ss = m.groups()
+        return f"{year}-{month}-{day}T{hh}:{mm}:{ss}"
+
+    m = re.match(r"^(\d{4})-(\d{2})-(\d{2})-(\d{2})-(\d{2})-(\d{2})$", raw)
+    if m:
+        year, month, day, hh, mm, ss = m.groups()
+        return f"{year}-{month}-{day}T{hh}:{mm}:{ss}"
+
+    return raw
+
+
 def _to_record(fields: dict[str, str], source: str, extra_id: str,
                subj_parsed: Optional[dict[str, str]]) -> dict[str, Any]:
     status = fields.get("Job Status") or (subj_parsed or {}).get("status", "") or ""
     start_end = fields.get("Start - End", "")
-    timestamp = start_end.split(" - ")[0].strip() if start_end else fields.get("Backup Job", "")
+    raw_timestamp = start_end.split(" - ")[0].strip() if start_end else fields.get("Backup Job", "")
+    timestamp = normalize_timestamp(raw_timestamp)
     return {
         "natural_key": "|".join([
             source, extra_id, fields.get("Destination", ""),

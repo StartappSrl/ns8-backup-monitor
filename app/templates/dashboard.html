@@ -77,6 +77,14 @@
   .panel{background:var(--panel); border:1px solid var(--border); border-radius:8px; overflow:hidden;}
   table{width:100%; border-collapse:collapse; font-size:13px;}
   thead th{text-align:left; font-size:11px; font-weight:600; color:var(--text-faint); padding:10px 14px; border-bottom:1px solid var(--border); background:var(--panel-2); white-space:nowrap;}
+  thead th.sortable{cursor:pointer; user-select:none;}
+  thead th.sortable:hover{color:var(--text);}
+  .sort-arrow{font-size:10px;}
+  .group-header-row td{
+    background:var(--panel-2); font-family:'IBM Plex Mono', monospace; font-size:11.5px;
+    font-weight:600; color:var(--text-muted); padding:8px 14px; border-bottom:1px solid var(--border);
+  }
+  .group-count{font-weight:400; color:var(--text-faint);}
   tbody tr{border-bottom:1px solid var(--border);}
   tbody tr:last-child{border-bottom:none;}
   tbody tr:hover{background:var(--panel-2);}
@@ -145,6 +153,7 @@
   let activeSevs = new Set(['CRITICAL','WARNING','OK','INFO']);
   let activeSender = '';
   let currentSenders = [];
+  let sortDir = 'desc'; // 'desc' = più recenti prima, 'asc' = più vecchi prima
 
   document.querySelectorAll('.chip').forEach(chip=>{
     chip.addEventListener('click', ()=>{
@@ -224,13 +233,19 @@
       if(q && !((r.user||'').toLowerCase().includes(q) || (r.backup_set||'').toLowerCase().includes(q))) return false;
       return true;
     });
-    filtered.sort((a,b)=> new Date(b.timestamp||0) - new Date(a.timestamp||0));
+    const dir = sortDir === 'asc' ? 1 : -1;
+    filtered.sort((a,b)=> dir * (new Date(a.timestamp||0) - new Date(b.timestamp||0)));
 
-    const showSenderCol = currentSenders.length > 1 && !activeSender;
+    const groupBySender = currentSenders.length > 1 && !activeSender;
     const headRow = document.getElementById('tableHeadRow');
-    headRow.innerHTML = '<th>Gravità</th><th>Data / ora</th>' +
-      (showSenderCol ? '<th>Mittente</th>' : '') +
-      '<th>Utente</th><th>Backup set</th><th>Destinazione</th><th>Stato</th><th>Dati</th>';
+    headRow.innerHTML = '<th>Gravità</th>' +
+      `<th class="sortable" id="dateHeader">Data / ora <span class="sort-arrow">${sortDir === 'desc' ? '▾' : '▴'}</span></th>` +
+      (groupBySender ? '' : '<th>Utente</th>') +
+      '<th>Backup set</th><th>Destinazione</th><th>Stato</th><th>Dati</th>';
+    document.getElementById('dateHeader').addEventListener('click', ()=>{
+      sortDir = sortDir === 'desc' ? 'asc' : 'desc';
+      render();
+    });
 
     const table = document.getElementById('reportTable');
     const empty = document.getElementById('emptyState');
@@ -238,22 +253,47 @@
       table.style.display = 'none';
       empty.style.display = 'block';
       empty.textContent = allReports.length ? 'Nessun report corrisponde ai filtri.' : 'Nessun report ricevuto finora.';
-    } else {
-      table.style.display = 'table';
-      empty.style.display = 'none';
-      document.getElementById('tableBody').innerHTML = filtered.map(r => `
+      return;
+    }
+    table.style.display = 'table';
+    empty.style.display = 'none';
+
+    function rowHtml(r){
+      return `
         <tr>
           <td><span class="sev-label ${r.severity}">${sevLabelIt(r.severity)}</span></td>
           <td class="cell-time">${escapeHtml(formatTs(r.timestamp))}</td>
-          ${showSenderCol ? `<td class="cell-dest">${escapeHtml(r.sender||'—')}</td>` : ''}
-          <td class="cell-user">${escapeHtml(r.user||'—')}</td>
+          ${groupBySender ? '' : `<td class="cell-user">${escapeHtml(r.user||'—')}</td>`}
           <td>${escapeHtml(r.backup_set||'—')}</td>
           <td class="cell-dest">${escapeHtml(r.destination||'—')}</td>
           <td class="cell-status">${escapeHtml(truncate(r.status,80))}</td>
           <td class="cell-size">${escapeHtml(r.data_size||'—')}</td>
         </tr>
-      `).join('');
+      `;
     }
+
+    if(!groupBySender){
+      document.getElementById('tableBody').innerHTML = filtered.map(rowHtml).join('');
+      return;
+    }
+
+    // Grouped view: one section per sender, in alphabetical order, each
+    // showing its own report count and keeping the current date sort
+    // within the group.
+    const groups = new Map();
+    for(const r of filtered){
+      const key = r.sender || '—';
+      if(!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(r);
+    }
+    const senderKeys = Array.from(groups.keys()).sort();
+    const colCount = 6; // Gravità, Data/ora, Backup set, Destinazione, Stato, Dati
+    document.getElementById('tableBody').innerHTML = senderKeys.map(sender => `
+      <tr class="group-header-row">
+        <td colspan="${colCount}">${escapeHtml(sender)} <span class="group-count">(${groups.get(sender).length})</span></td>
+      </tr>
+      ${groups.get(sender).map(rowHtml).join('')}
+    `).join('');
   }
 
   load();

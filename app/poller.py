@@ -36,6 +36,7 @@ import sqlite3
 import sys
 import time
 from email.header import decode_header
+from email.utils import parseaddr
 
 import parsing
 from db import get_db, DB_PATH
@@ -160,6 +161,7 @@ def run_cycle(conn_db: sqlite3.Connection) -> None:
                 msg = email.message_from_bytes(raw_bytes)
                 subject = decode_mime_words(msg.get("Subject", ""))
                 source_label = subject or f"{folder}-uid-{uid_str}"
+                sender_email = parseaddr(msg.get("From", ""))[1].lower()
 
                 try:
                     records = parsing.parse_email_message(raw_bytes, source_label)
@@ -171,16 +173,16 @@ def run_cycle(conn_db: sqlite3.Connection) -> None:
                     cur.execute(
                         """
                         INSERT INTO reports (
-                            natural_key, source, timestamp, user, backup_set,
+                            natural_key, source, sender, timestamp, user, backup_set,
                             destination, status, data_size, ip_address,
                             start_end, job_id, severity
-                        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+                        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
                         ON CONFLICT(natural_key) DO UPDATE SET
                             status=excluded.status,
                             severity=excluded.severity
                         """,
                         (
-                            rec["natural_key"], rec["source"], rec["timestamp"],
+                            rec["natural_key"], rec["source"], sender_email, rec["timestamp"],
                             rec["user"], rec["backup_set"], rec["destination"],
                             rec["status"], rec["data_size"], rec["ip_address"],
                             rec["start_end"], rec["job_id"], rec["severity"],

@@ -51,6 +51,17 @@
   .stat.warning{border-left-color:var(--warning);} .stat.warning .n{color:var(--warning);}
   .stat.ok{border-left-color:var(--ok);} .stat.ok .n{color:var(--ok);}
   .controls{display:flex; gap:10px; flex-wrap:wrap; align-items:center; background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:10px 12px;}
+  .sender-tabs{display:flex; gap:4px; flex-wrap:wrap; border-bottom:1px solid var(--border); padding-bottom:0;}
+  .sender-tab{
+    padding:9px 16px; font-size:13px; color:var(--text-muted); cursor:pointer;
+    border:1px solid transparent; border-bottom:none; border-radius:8px 8px 0 0;
+    background:transparent; margin-bottom:-1px; font-family:'IBM Plex Mono', monospace;
+  }
+  .sender-tab:hover{color:var(--text);}
+  .sender-tab.active{
+    color:var(--text); background:var(--panel); border-color:var(--border);
+    font-weight:600;
+  }
   .chip{display:flex; align-items:center; gap:6px; padding:6px 11px; border-radius:20px; border:1px solid var(--border); font-size:12.5px; cursor:pointer; background:var(--panel-2); color:var(--text-muted); user-select:none;}
   .chip .dot{width:7px; height:7px; border-radius:50%;}
   .chip[data-sev="CRITICAL"] .dot{background:var(--critical);}
@@ -100,6 +111,8 @@
 </header>
 
 <main>
+  <div class="sender-tabs" id="senderTabs"></div>
+
   <div class="summary" id="summary"></div>
 
   <div class="controls">
@@ -115,7 +128,7 @@
   <div class="panel">
     <table id="reportTable" style="display:none;">
       <thead>
-        <tr>
+        <tr id="tableHeadRow">
           <th>Gravità</th><th>Data / ora</th><th>Utente</th><th>Backup set</th>
           <th>Destinazione</th><th>Stato</th><th>Dati</th>
         </tr>
@@ -130,6 +143,8 @@
 (function(){
   let allReports = [];
   let activeSevs = new Set(['CRITICAL','WARNING','OK','INFO']);
+  let activeSender = '';
+  let currentSenders = [];
 
   document.querySelectorAll('.chip').forEach(chip=>{
     chip.addEventListener('click', ()=>{
@@ -155,13 +170,33 @@
   }
 
   async function load(){
-    const res = await fetch('/api/reports', {credentials:'same-origin'});
+    const url = activeSender ? `/api/reports?sender=${encodeURIComponent(activeSender)}` : '/api/reports';
+    const res = await fetch(url, {credentials:'same-origin'});
     if(res.status === 401 || res.redirected){ window.location.href = '/login'; return; }
     const data = await res.json();
     allReports = data.reports || [];
+    renderSenderTabs(data.senders || []);
     renderSummary(data.summary || {});
     renderDestinations(data.destinations || []);
     render();
+  }
+
+  function renderSenderTabs(senders){
+    currentSenders = senders;
+    if(senders.length <= 1){
+      document.getElementById('senderTabs').innerHTML = '';
+      return;
+    }
+    const tabs = [{value:'', label:'Tutti'}].concat(senders.map(s=>({value:s, label:s})));
+    document.getElementById('senderTabs').innerHTML = tabs.map(t => `
+      <div class="sender-tab ${t.value === activeSender ? 'active' : ''}" data-sender="${escapeHtml(t.value)}">${escapeHtml(t.label)}</div>
+    `).join('');
+    document.querySelectorAll('.sender-tab').forEach(tab=>{
+      tab.addEventListener('click', ()=>{
+        activeSender = tab.dataset.sender;
+        load();
+      });
+    });
   }
 
   function renderSummary(summary){
@@ -191,6 +226,12 @@
     });
     filtered.sort((a,b)=> new Date(b.timestamp||0) - new Date(a.timestamp||0));
 
+    const showSenderCol = currentSenders.length > 1 && !activeSender;
+    const headRow = document.getElementById('tableHeadRow');
+    headRow.innerHTML = '<th>Gravità</th><th>Data / ora</th>' +
+      (showSenderCol ? '<th>Mittente</th>' : '') +
+      '<th>Utente</th><th>Backup set</th><th>Destinazione</th><th>Stato</th><th>Dati</th>';
+
     const table = document.getElementById('reportTable');
     const empty = document.getElementById('emptyState');
     if(filtered.length === 0){
@@ -204,6 +245,7 @@
         <tr>
           <td><span class="sev-label ${r.severity}">${sevLabelIt(r.severity)}</span></td>
           <td class="cell-time">${escapeHtml(formatTs(r.timestamp))}</td>
+          ${showSenderCol ? `<td class="cell-dest">${escapeHtml(r.sender||'—')}</td>` : ''}
           <td class="cell-user">${escapeHtml(r.user||'—')}</td>
           <td>${escapeHtml(r.backup_set||'—')}</td>
           <td class="cell-dest">${escapeHtml(r.destination||'—')}</td>

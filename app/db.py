@@ -16,6 +16,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS reports (
     natural_key TEXT PRIMARY KEY,
     source      TEXT,
+    sender      TEXT,
     timestamp   TEXT,
     user        TEXT,
     backup_set  TEXT,
@@ -51,5 +52,13 @@ def get_db() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
+    # Migration: add columns that didn't exist in earlier versions of this
+    # schema, for databases created before this column was introduced.
+    # CREATE TABLE IF NOT EXISTS doesn't alter an already-existing table.
+    try:
+        conn.execute("ALTER TABLE reports ADD COLUMN sender TEXT")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # column already exists
     conn.commit()
     return conn

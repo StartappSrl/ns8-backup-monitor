@@ -1,0 +1,59 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "configure-module input",
+    "$id": "http://schema.nethserver.org/backup-monitor/configure-module-input.json",
+    "description": "Configure the IMAP mailbox backup-monitor should poll",
+    "type": "object",
+    "properties": {
+        "imap_host": {
+            "type": "string",
+            "minLength": 1
+        },
+        "imap_port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535,
+            "default": 993
+        },
+        "imap_ssl": {
+            "type": "boolean",
+            "default": true
+        },
+        "imap_username": {
+            "type": "string",
+            "minLength": 1
+        },
+        "imap_password": {
+            "type": "string",
+            "description": "Only required the first time, or to change it. Omit to keep the current password."
+        },
+        "imap_folder": {
+            "type": "string",
+            "default": "INBOX"
+        },
+        "sender_filter": {
+            "type": "string",
+            "format": "email",
+            "description": "Only emails coming from this address are analyzed"
+        },
+        "poll_interval": {
+            "type": "integer",
+            "minimum": 30,
+            "default": 300,
+            "description": "Seconds between two IMAP checks"
+        }
+    },
+    "required": ["imap_host", "imap_username", "sender_filter"],
+    "examples": [
+        {
+            "imap_host": "mail.example.org",
+            "imap_port": 993,
+            "imap_ssl": true,
+            "imap_username": "support@example.org",
+            "imap_password": "secret",
+            "imap_folder": "INBOX",
+            "sender_filter": "backup@1backup.it",
+            "poll_interval": 300
+        }
+    ]
+}

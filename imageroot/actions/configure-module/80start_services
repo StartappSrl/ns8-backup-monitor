@@ -1,0 +1,11 @@
+#!/bin/bash
+
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+# If the control reaches this step, the service can be enabled and (re)started
+# so that the poller picks up the configuration written by 20configure.
+
+systemctl --user enable backup-monitor.service
+systemctl --user restart backup-monitor.service

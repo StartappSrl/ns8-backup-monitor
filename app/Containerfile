@@ -1,0 +1,21 @@
+#
+# Container image for the backup-monitor poller.
+# This is the "workload" image referenced by org.nethserver.images in the
+# module's build-images.sh. It is a normal, standalone container image
+# (unlike the module's own scratch-based image, which only ships
+# imageroot/ and ui/dist and is never actually run as a workload).
+#
+FROM docker.io/library/python:3.12-slim
+
+RUN useradd --create-home --uid 1000 --shell /bin/bash appuser
+
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY parsing.py poller.py ./
+
+USER appuser
+VOLUME ["/state"]
+
+ENTRYPOINT ["python3", "/app/poller.py"]

@@ -1,0 +1,20 @@
+{
+  "name": "backup-monitor",
+  "description": {
+    "en": "Monitors backup report emails and flags failures by severity and destination",
+    "it": "Analizza le email di report di backup e segnala i problemi per gravità e destinazione"
+  },
+  "categories": ["backup", "monitoring"],
+  "authors": [
+    {
+      "name": "Name Surname",
+      "email": "author@yourmail.org"
+    }
+  ],
+  "docs": {
+    "documentation_url": "https://docs.backup-monitor.com/",
+    "bug_url": "https://github.com/NethServer/dev",
+    "code_url": "https://github.com/author/ns8-backup-monitor"
+  },
+  "source": "ghcr.io/nethserver/backup-monitor"
+}

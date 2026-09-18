@@ -1,0 +1,15 @@
+#!/usr/bin/env python3
+
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+# backup-monitor has no HTTP-exposed route to clean up: the poller
+# container only writes to the module's own state directory (removed
+# automatically by ns8-core when the module is uninstalled) and never
+# publishes a TCP port. Nothing to do here.
+
+import json
+import sys
+
+json.load(sys.stdin)  # drain stdin, as ns8-core expects

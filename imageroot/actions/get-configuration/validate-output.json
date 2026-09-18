@@ -1,0 +1,16 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "get-configuration output",
+    "$id": "http://schema.nethserver.org/backup-monitor/get-configuration-output.json",
+    "type": "object",
+    "properties": {
+        "imap_host": {"type": "string"},
+        "imap_port": {"type": "integer"},
+        "imap_ssl": {"type": "boolean"},
+        "imap_username": {"type": "string"},
+        "imap_password_set": {"type": "boolean"},
+        "imap_folder": {"type": "string"},
+        "sender_filter": {"type": "string"},
+        "poll_interval": {"type": "integer"}
+    }
+}

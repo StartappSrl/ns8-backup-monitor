@@ -1,0 +1,33 @@
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+#
+# This systemd unit starts the backup-monitor poller using Podman.
+# Most parts of this file come from podman-generate-systemd.
+#
+[Unit]
+Description=backup-monitor poller
+
+[Service]
+Environment=PODMAN_SYSTEMD_UNIT=%n
+EnvironmentFile=%E/state/environment
+WorkingDirectory=%E/state
+Restart=always
+ExecStartPre=/bin/rm -f %t/backup-monitor.pid %t/backup-monitor.ctr-id
+ExecStart=/usr/bin/podman run \
+    --detach \
+    --conmon-pidfile=%t/backup-monitor.pid \
+    --cidfile=%t/backup-monitor.ctr-id \
+    --cgroups=no-conmon \
+    --replace --name=%N \
+    --volume=%E/state:/state:Z \
+    --env-file=config.env \
+    ${BACKUP_MONITOR_POLLER_IMAGE}
+ExecStop=/usr/bin/podman stop --ignore --cidfile %t/backup-monitor.ctr-id -t 10
+ExecStopPost=/usr/bin/podman rm --ignore -f --cidfile %t/backup-monitor.ctr-id
+PIDFile=%t/backup-monitor.pid
+Type=forking
+
+[Install]
+WantedBy=default.target

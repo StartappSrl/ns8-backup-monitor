@@ -1,0 +1,72 @@
+{
+    "common": {
+        "required": "Obbligatorio",
+        "processing": "In elaborazione…",
+        "work_in_progress": "In lavorazione"
+    },
+    "reports": {
+        "title": "Report backup",
+        "refresh": "Aggiorna",
+        "all_destinations": "Tutte le destinazioni",
+        "search_placeholder": "Cerca utente o backup set…",
+        "severity_critical": "Critico",
+        "severity_warning": "Attenzione",
+        "severity_ok": "OK",
+        "severity_info": "Info",
+        "col_severity": "Gravità",
+        "col_time": "Data / ora",
+        "col_user": "Utente",
+        "col_set": "Backup set",
+        "col_destination": "Destinazione",
+        "col_status": "Stato",
+        "col_size": "Dati",
+        "no_reports_title": "Nessun report ricevuto finora",
+        "no_match_title": "Nessun report corrisponde ai filtri",
+        "job_id": "Job ID",
+        "period": "Periodo",
+        "ip_address": "Indirizzo IP",
+        "source": "Email sorgente"
+    },
+    "settings": {
+        "save": "Salva",
+        "title": "Impostazioni",
+        "configure_instance": "Configura {instance}",
+        "imap_host": "Server IMAP",
+        "imap_port": "Porta IMAP",
+        "imap_ssl": "Usa SSL/TLS",
+        "imap_username": "Nome utente",
+        "imap_password": "Password",
+        "imap_password_unchanged": "Lascia vuoto per non modificarla",
+        "imap_folder": "Cartella da controllare",
+        "sender_filter": "Indirizzo mittente da analizzare",
+        "sender_filter_helper": "Solo le email provenienti da questo indirizzo verranno analizzate",
+        "poll_interval": "Intervallo di controllo (secondi)",
+        "poll_interval_helper": "Ogni quanto controllare la casella per nuovi report"
+    },
+    "error": {
+        "error": "Errore",
+        "404": "Risorsa non trovata",
+        "validation_error": "Errore di validazione",
+        "network_error": "Errore di rete",
+        "cannot_retrieve_installed_modules": "Impossibile elencare moduli installati",
+        "cannot_retrieve_module_info": "Impossibile recuperare info modulo",
+        "network_timeout": "Timeout di rete",
+        "generic_error": "Qualcosa è andato storto",
+        "401": "Autenticazione non valida",
+        "403": "Operazione non autorizzata"
+    },
+    "action": {
+        "configure-module": "Configura modulo",
+        "get-configuration": "Visualizza configurazione",
+        "list-reports": "Elenca report",
+        "get-module-info": "Visualizza info modulo",
+        "get-name": "Visualizza nome",
+        "list-installed-modules": "Elenca moduli installati"
+    },
+    "task": {
+        "cannot_create_task": "Impossibile eseguire il task {action}"
+    },
+    "about": {
+        "title": "Informazioni"
+    }
+}

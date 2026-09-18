@@ -1,0 +1,72 @@
+{
+    "common": {
+        "required": "Required",
+        "work_in_progress": "Work in progress",
+        "processing": "Processing..."
+    },
+    "reports": {
+        "title": "Backup reports",
+        "refresh": "Refresh",
+        "all_destinations": "All destinations",
+        "search_placeholder": "Search user or backup set…",
+        "severity_critical": "Critical",
+        "severity_warning": "Warning",
+        "severity_ok": "OK",
+        "severity_info": "Info",
+        "col_severity": "Severity",
+        "col_time": "Date / time",
+        "col_user": "User",
+        "col_set": "Backup set",
+        "col_destination": "Destination",
+        "col_status": "Status",
+        "col_size": "Data",
+        "no_reports_title": "No reports received yet",
+        "no_match_title": "No report matches the current filters",
+        "job_id": "Job ID",
+        "period": "Period",
+        "ip_address": "IP address",
+        "source": "Source email"
+    },
+    "settings": {
+        "title": "Settings",
+        "configure_instance": "Configure {instance}",
+        "save": "Save",
+        "imap_host": "IMAP server",
+        "imap_port": "IMAP port",
+        "imap_ssl": "Use SSL/TLS",
+        "imap_username": "Username",
+        "imap_password": "Password",
+        "imap_password_unchanged": "Leave empty to keep it unchanged",
+        "imap_folder": "Folder to check",
+        "sender_filter": "Sender address to analyze",
+        "sender_filter_helper": "Only emails coming from this address will be analyzed",
+        "poll_interval": "Check interval (seconds)",
+        "poll_interval_helper": "How often the mailbox is checked for new reports"
+    },
+    "about": {
+        "title": "About"
+    },
+    "task": {
+        "cannot_create_task": "Cannot create task {action}"
+    },
+    "action": {
+        "get-configuration": "Get configuration",
+        "configure-module": "Configure module",
+        "list-reports": "List reports",
+        "get-module-info": "Get module info",
+        "get-name": "Get name",
+        "list-installed-modules": "List installed modules"
+    },
+    "error": {
+        "error": "Error",
+        "generic_error": "Something went wrong",
+        "validation_error": "Validation error",
+        "network_error": "Network error",
+        "network_timeout": "Network timeout",
+        "401": "Invalid authentication",
+        "403": "Operation not authorized",
+        "404": "Resource not found",
+        "cannot_retrieve_module_info": "Cannot retrieve module info",
+        "cannot_retrieve_installed_modules": "Cannot retrieve installed modules"
+    }
+}

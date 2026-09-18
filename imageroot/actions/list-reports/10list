@@ -1,0 +1,70 @@
+#!/usr/bin/env python3
+
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+import json
+import os
+import sqlite3
+import sys
+
+DB_PATH = "reports.db"  # relative to the module state directory (CWD),
+                         # same file the poller container writes to /state/reports.db
+
+
+def main():
+    try:
+        request = json.load(sys.stdin)
+    except Exception:
+        request = {}
+
+    if not os.path.exists(DB_PATH):
+        json.dump({"reports": [], "summary": {"CRITICAL": 0, "WARNING": 0, "OK": 0, "INFO": 0}}, fp=sys.stdout)
+        return
+
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+
+    query = "SELECT * FROM reports WHERE 1=1"
+    params = []
+
+    severities = request.get("severity")
+    if severities:
+        placeholders = ",".join("?" for _ in severities)
+        query += f" AND severity IN ({placeholders})"
+        params.extend(severities)
+
+    destination = request.get("destination")
+    if destination:
+        query += " AND destination = ?"
+        params.append(destination)
+
+    search = request.get("search")
+    if search:
+        query += " AND (user LIKE ? OR backup_set LIKE ?)"
+        like = f"%{search}%"
+        params.extend([like, like])
+
+    query += " ORDER BY received_at DESC LIMIT 500"
+
+    rows = [dict(r) for r in conn.execute(query, params).fetchall()]
+
+    # summary is computed on the FULL table (not the filtered query), so
+    # the UI's severity counters always reflect the overall picture
+    summary = {"CRITICAL": 0, "WARNING": 0, "OK": 0, "INFO": 0}
+    for row in conn.execute("SELECT severity, COUNT(*) AS n FROM reports GROUP BY severity"):
+        summary[row["severity"]] = row["n"]
+
+    destinations = [
+        r["destination"] for r in
+        conn.execute("SELECT DISTINCT destination FROM reports WHERE destination != '' ORDER BY destination")
+    ]
+
+    conn.close()
+
+    json.dump({"reports": rows, "summary": summary, "destinations": destinations}, fp=sys.stdout)
+
+
+if __name__ == "__main__":
+    main()

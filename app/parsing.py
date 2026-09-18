@@ -67,7 +67,9 @@ OK_KEYS = ["success", "completed successfully", "no errors"]
 
 
 def classify_severity(status_text: str) -> str:
-    s = (status_text or "").lower()
+    s = (status_text or "").lower().strip()
+    if s == "ok":
+        return "OK"
     if any(k in s for k in CRITICAL_KEYS):
         return "CRITICAL"
     if any(k in s for k in WARNING_KEYS):

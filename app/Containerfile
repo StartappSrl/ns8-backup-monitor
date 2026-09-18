@@ -9,8 +9,6 @@
 #
 FROM docker.io/library/python:3.12-slim
 
-RUN useradd --create-home --uid 1000 --shell /bin/bash appuser
-
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
@@ -18,7 +16,15 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY parsing.py poller.py db.py authlib.py webapp.py main.py ./
 COPY templates ./templates
 
-USER appuser
+# Deliberately NOT dropping to a non-root user here: /state is a bind
+# mount of the module's own host-side state directory (owned by the
+# module's unprivileged system user), and under rootless Podman a
+# non-root container user cannot reliably write to a bind-mounted host
+# directory it doesn't numerically own. Running as root INSIDE the
+# container is safe here: rootless Podman maps container root back to
+# the unprivileged host user that started the container, so this never
+# grants real host privileges - it's the standard pattern for
+# NS8/rootless-Podman modules that need to write to their own state dir.
 VOLUME ["/state"]
 EXPOSE 8080
 

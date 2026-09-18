@@ -7,3 +7,4 @@ jobs:
   build-apidoc:
     name: "Delete apidoc branch ${{ github.event.ref }}"
     uses: NethServer/ns8-github-actions/.github/workflows/clean-apidoc.yml@v1
+    permissions: contents: write

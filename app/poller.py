@@ -35,6 +35,7 @@ import signal
 import sqlite3
 import sys
 import time
+from datetime import datetime, timedelta, timezone
 from email.header import decode_header
 from email.utils import parseaddr
 
@@ -117,13 +118,33 @@ def build_sender_search(sender_filters: list[str]) -> str:
     return f"({terms[0]})"
 
 
+def build_since_clause(retention_days: int) -> str:
+    """Build an IMAP SEARCH "SINCE <date>" criterion so the server itself
+    filters out anything older than the retention window, instead of the
+    poller fetching and parsing the ENTIRE mailbox history every cycle
+    (which, with a large/long-lived mailbox, is slow enough to make the
+    poller effectively unable to keep up - by the time one full pass
+    finishes, it's already due to start the next). Messages older than
+    retention are purged from the reports table right after anyway, so
+    there is no reason to ever fetch them.
+
+    A day of slack beyond the exact retention window guards against
+    timezone/off-by-one edges around SINCE's date-only (no time-of-day)
+    granularity.
+    """
+    since_date = datetime.now(timezone.utc) - timedelta(days=retention_days + 1)
+    # IMAP SINCE date format: DD-Mon-YYYY (RFC 3501), e.g. "04-Sep-2026".
+    return f'SINCE {since_date.strftime("%d-%b-%Y")}'
+
+
 def run_cycle(conn_db: sqlite3.Connection) -> None:
     folders = parse_csv_env("IMAP_FOLDERS", "INBOX")
     sender_filters = parse_csv_env("IMAP_SENDER_FILTERS", "")
     if not sender_filters:
         log.warning("No sender filter configured, skipping cycle")
         return
-    search_criteria = build_sender_search(sender_filters)
+    retention_days = int(os.environ.get("RETENTION_DAYS", "15"))
+    search_criteria = f"{build_since_clause(retention_days)} {build_sender_search(sender_filters)}"
 
     imap = connect_imap()
     try:

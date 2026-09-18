@@ -96,7 +96,8 @@
   .sev-label.INFO{background:var(--info-bg); color:var(--info);}
   .cell-time,.cell-dest,.cell-size{font-family:'IBM Plex Mono',monospace; font-size:12px; color:var(--text-muted); white-space:nowrap;}
   .cell-user{font-weight:600;}
-  .cell-status{color:var(--text-muted); font-size:12.5px; max-width:340px;}
+  .cell-status{color:var(--text-muted); font-size:12.5px; max-width:340px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .cell-backupset{max-width:220px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
   .report-row{cursor:pointer;}
   .expand-caret{display:inline-block; width:12px; color:var(--text-faint); font-size:10px;}
   .detail-row td{background:var(--panel-2); padding:14px 20px; border-bottom:1px solid var(--border);}
@@ -283,7 +284,7 @@
           <td><span class="sev-label ${r.severity}">${sevLabelIt(r.severity)}</span></td>
           <td class="cell-time">${escapeHtml(formatTs(r.timestamp))}</td>
           ${groupBySender ? '' : `<td class="cell-user">${escapeHtml(r.user||'—')}</td>`}
-          <td>${escapeHtml(r.backup_set||'—')}</td>
+          <td class="cell-backupset">${escapeHtml(r.backup_set||'—')}</td>
           <td class="cell-dest">${escapeHtml(r.destination||'—')}</td>
           <td class="cell-status">
             <span class="expand-caret">${isOpen ? '▾' : '▸'}</span>

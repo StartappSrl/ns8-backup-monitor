@@ -160,7 +160,7 @@ def extract_records_from_text(raw_text: str) -> list[dict[str, str]]:
 
 
 _SUBJECT_RE = re.compile(
-    r"(?:Backup Report|Report di backup)\s*\[(.*?)\]\s*>\s*(.*?)\s*>\s*(.*?)\s*>\s*(?:Job|Attività)\s*(.*)",
+    r"(?:Backup Report|Report di backup)\s*\[(.*?)\]\s*>\s*(.*?)\s*>\s*(.*?)\s*>\s*\S+\s*(\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2})",
     re.IGNORECASE | re.DOTALL,
 )
 
@@ -205,6 +205,18 @@ def normalize_timestamp(raw: str) -> str:
     return raw
 
 
+def _clean_key_part(s: str) -> str:
+    """Collapse embedded CR/LF (e.g. from folded email header lines) and
+    other whitespace runs into single spaces. Values containing raw
+    CRLF sequences survive a round-trip through an HTML attribute
+    (write markup -> browser re-parses it) with the \\r silently
+    dropped, which would make a later strict string comparison against
+    the original Python-side value fail - used for natural_key, which
+    the dashboard relies on as a stable, exact identifier for each row
+    (e.g. to remember which rows the user expanded)."""
+    return re.sub(r"\s+", " ", s or "").strip()
+
+
 def _to_record(fields: dict[str, str], source: str, extra_id: str,
                subj_parsed: Optional[dict[str, str]]) -> dict[str, Any]:
     status = fields.get("Job Status") or (subj_parsed or {}).get("status", "") or ""
@@ -216,7 +228,8 @@ def _to_record(fields: dict[str, str], source: str, extra_id: str,
     timestamp = normalize_timestamp(raw_timestamp)
     return {
         "natural_key": "|".join([
-            source, extra_id, fields.get("Destination", ""),
+            _clean_key_part(source), _clean_key_part(extra_id),
+            _clean_key_part(fields.get("Destination", "")),
         ]),
         "source": source,
         "timestamp": timestamp,

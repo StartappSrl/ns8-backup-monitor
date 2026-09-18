@@ -178,6 +178,7 @@ def run_cycle(conn_db: sqlite3.Connection) -> None:
                             start_end, job_id, severity
                         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
                         ON CONFLICT(natural_key) DO UPDATE SET
+                            sender=excluded.sender,
                             status=excluded.status,
                             severity=excluded.severity
                         """,

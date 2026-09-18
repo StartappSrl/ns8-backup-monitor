@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS reports (
     start_end   TEXT,
     job_id      TEXT,
     severity    TEXT,
+    log_excerpt TEXT,
     received_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS processed_messages (
@@ -47,18 +48,23 @@ CREATE TABLE IF NOT EXISTS login_attempts (
 );
 """
 
+# Columns added after the table's original creation, for databases created
+# before they existed - CREATE TABLE IF NOT EXISTS doesn't alter an
+# already-existing table, so each is added here via ALTER TABLE instead.
+_REPORTS_MIGRATIONS = [
+    "ALTER TABLE reports ADD COLUMN sender TEXT",
+    "ALTER TABLE reports ADD COLUMN log_excerpt TEXT",
+]
+
 
 def get_db() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
-    # Migration: add columns that didn't exist in earlier versions of this
-    # schema, for databases created before this column was introduced.
-    # CREATE TABLE IF NOT EXISTS doesn't alter an already-existing table.
-    try:
-        conn.execute("ALTER TABLE reports ADD COLUMN sender TEXT")
-        conn.commit()
-    except sqlite3.OperationalError:
-        pass  # column already exists
+    for stmt in _REPORTS_MIGRATIONS:
+        try:
+            conn.execute(stmt)
+        except sqlite3.OperationalError:
+            pass  # column already exists
     conn.commit()
     return conn

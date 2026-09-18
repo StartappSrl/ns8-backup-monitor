@@ -104,6 +104,13 @@
   .detail-grid dt{font-size:11px; color:var(--text-faint); white-space:nowrap;}
   .detail-grid dd{margin:0; font-size:12.5px; color:var(--text);}
   .detail-grid dd.mono{font-family:'IBM Plex Mono', monospace; font-size:12px;}
+  .log-excerpt{margin-top:12px; padding-top:12px; border-top:1px solid var(--border);}
+  .log-excerpt-label{font-size:11px; color:var(--text-faint); margin-bottom:6px;}
+  .log-excerpt pre{
+    margin:0; font-family:'IBM Plex Mono', monospace; font-size:11.5px; color:var(--critical);
+    background:var(--critical-bg); border-radius:6px; padding:10px 12px;
+    max-height:220px; overflow:auto; white-space:pre-wrap; word-break:break-word;
+  }
   .empty-state{padding:50px 20px; text-align:center; color:var(--text-faint);}
 </style>
 </head>
@@ -296,6 +303,12 @@
                 <dt>Job ID</dt><dd class="mono">${escapeHtml(r.job_id||'—')}</dd>
                 <dt>Sorgente</dt><dd>${escapeHtml(r.source||'—')}</dd>
               </dl>
+              ${r.log_excerpt ? `
+                <div class="log-excerpt">
+                  <div class="log-excerpt-label">Righe di log rilevanti (dal PDF)</div>
+                  <pre>${escapeHtml(r.log_excerpt)}</pre>
+                </div>
+              ` : ''}
             </td>
           </tr>
         `;

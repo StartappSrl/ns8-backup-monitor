@@ -209,7 +209,10 @@ def _to_record(fields: dict[str, str], source: str, extra_id: str,
                subj_parsed: Optional[dict[str, str]]) -> dict[str, Any]:
     status = fields.get("Job Status") or (subj_parsed or {}).get("status", "") or ""
     start_end = fields.get("Start - End", "")
-    raw_timestamp = start_end.split(" - ")[0].strip() if start_end else fields.get("Backup Job", "")
+    raw_timestamp = (
+        start_end.split(" - ")[0].strip() if start_end
+        else fields.get("Backup Job") or (subj_parsed or {}).get("jobId", "") or ""
+    )
     timestamp = normalize_timestamp(raw_timestamp)
     return {
         "natural_key": "|".join([

@@ -55,25 +55,41 @@ IGNORE_LINES = {
 }
 
 CRITICAL_KEYS = [
+    # English
     "failed", "error", "could not", "cannot", "unable", "corrupt",
     "denied", "timeout", "timed out", "disk full", "not enough space",
     "authentication",
+    # Italiano
+    "fallito", "fallita", "errore", "impossibile", "corrotto", "negato",
+    "scaduto", "spazio esaurito", "autenticazione",
 ]
 WARNING_KEYS = [
+    # English
     "skipped", "still running", "warning", "quota", "partial", "retry",
-    "delayed",
+    "delayed", "exceeded",
+    # Italiano
+    "saltato", "saltata", "ancora in corso", "attenzione", "parziale",
+    "ritardo", "superata", "superato",
 ]
-OK_KEYS = ["success", "completed successfully", "no errors"]
+OK_KEYS = [
+    # English
+    "success", "completed successfully", "no errors",
+    # Italiano
+    "riuscito", "riuscita", "completato con successo", "nessun errore",
+]
 
 
 def classify_severity(status_text: str) -> str:
     s = (status_text or "").lower().strip()
-    if s == "ok":
-        return "OK"
     if any(k in s for k in CRITICAL_KEYS):
         return "CRITICAL"
     if any(k in s for k in WARNING_KEYS):
         return "WARNING"
+    # "OK" is often followed by parenthetical detail, e.g.
+    # "OK (no files backed up)" / "OK (nessun file sottoposto a backup)" -
+    # match it as a prefix rather than requiring an exact "ok" status.
+    if s.startswith("ok"):
+        return "OK"
     if any(k in s for k in OK_KEYS):
         return "OK"
     return "INFO"
@@ -144,7 +160,7 @@ def extract_records_from_text(raw_text: str) -> list[dict[str, str]]:
 
 
 _SUBJECT_RE = re.compile(
-    r"Backup Report\s*\[(.*?)\]\s*>\s*(.*?)\s*>\s*(.*?)\s*>\s*Job\s*(.*)",
+    r"(?:Backup Report|Report di backup)\s*\[(.*?)\]\s*>\s*(.*?)\s*>\s*(.*?)\s*>\s*(?:Job|Attività)\s*(.*)",
     re.IGNORECASE | re.DOTALL,
 )
 

@@ -229,6 +229,23 @@ def parse_account_quota_subject(subject: str) -> Optional[dict[str, str]]:
     return {"user": user.strip(), "status": tail.strip()}
 
 
+# Yet another distinct 1Backup notification type: a purely informational
+# account-settings-changed notice, e.g.:
+#   "User settings for server comptech(comptech) has just been updated"
+# No job/date, no problem to report - always INFO.
+_ACCOUNT_UPDATED_RE = re.compile(
+    r"^User settings for\s*(.*?)\s*has just been updated\.?\s*$",
+    re.IGNORECASE,
+)
+
+
+def parse_account_updated_subject(subject: str) -> Optional[dict[str, str]]:
+    m = _ACCOUNT_UPDATED_RE.match((subject or "").strip())
+    if not m:
+        return None
+    return {"user": m.group(1).strip(), "status": "User settings updated"}
+
+
 # A second, unrelated report format seen from notifiche_backup@startappitalia.it
 # ("SQL Master Backup" / "SQL Server Management Tool" notifications), e.g.:
 #   "[LOGGIA] ✅ SQL COMPLETATO — Backup DB Principali (FULL) — 18/09/2026 22:05"
@@ -524,6 +541,34 @@ def parse_eml_bytes(raw_bytes: bytes, source: str) -> list[dict[str, Any]]:
             "start_end": "",
             "job_id": "",
             "severity": "CRITICAL",
+            "log_excerpt": "",
+        }]
+
+    # Purely informational account-settings-changed notice (see
+    # parse_account_updated_subject) - always INFO, nothing to classify.
+    account_updated = parse_account_updated_subject(subject)
+    if account_updated:
+        status = account_updated["status"]
+        try:
+            dt = parsedate_to_datetime(date_header) if date_header else None
+            timestamp = dt.strftime("%Y-%m-%dT%H:%M:%S") if dt else ""
+        except (TypeError, ValueError):
+            timestamp = ""
+        return [{
+            "natural_key": "|".join([
+                _clean_key_part(source), _clean_key_part(date_header or subject), "",
+            ]),
+            "source": source,
+            "timestamp": timestamp,
+            "user": account_updated["user"],
+            "backup_set": "",
+            "destination": "",
+            "status": status,
+            "data_size": "",
+            "ip_address": "",
+            "start_end": "",
+            "job_id": "",
+            "severity": "INFO",
             "log_excerpt": "",
         }]
 

@@ -22,6 +22,7 @@ from __future__ import annotations
 import base64
 import email
 import re
+import unicodedata
 from email.header import decode_header, make_header
 from email.message import Message
 from email.utils import parseaddr, parsedate_to_datetime
@@ -189,7 +190,7 @@ def parse_subject(subject: str) -> Optional[dict[str, str]]:
 # Unlike the 1Backup format, the customer/user name is the FIRST bracketed
 # token, and fields are separated by em dashes rather than ">".
 _BRACKET_DASH_SUBJECT_RE = re.compile(
-    r"^\[(.*?)\]\s*(.*?)\s*—\s*(.*?)\s*—\s*(\d{2}/\d{2}/\d{4})\s+(\d{2}:\d{2})\s*$"
+    r"^\[(.*?)\]\s*(.*?)\s*[-–—―]\s*(.*?)\s*[-–—―]\s*(\d{2}/\d{2}/\d{4})\s+(\d{2}:\d{2})\s*$"
 )
 
 
@@ -350,13 +351,22 @@ def decode_mime_header(raw: str) -> str:
     isn't MIME-encoded is returned unchanged. Without this, parse_subject
     would silently fail to match against the raw encoded-word form -
     matching poller.py's own decode_mime_words(), kept here too so this
-    module works standalone on whatever msg.get('Subject') returns."""
+    module works standalone on whatever msg.get('Subject') returns.
+
+    Also normalizes to Unicode NFC (composed) form: an accented character
+    can arrive as either a single precomposed codepoint or a base letter
+    plus a separate combining accent - visually identical but a different
+    byte sequence, which silently breaks any literal-text regex/substring
+    match against it (this has bitten several of the format-specific
+    parsers below; normalizing once here avoids the same class of bug
+    recurring everywhere else that matches literal accented words)."""
     if not raw:
         return ""
     try:
-        return str(make_header(decode_header(raw)))
+        decoded = str(make_header(decode_header(raw)))
     except Exception:
-        return raw
+        decoded = raw
+    return unicodedata.normalize("NFC", decoded)
 
 
 def parse_eml_bytes(raw_bytes: bytes, source: str) -> list[dict[str, Any]]:
@@ -372,7 +382,12 @@ def parse_eml_bytes(raw_bytes: bytes, source: str) -> list[dict[str, Any]]:
                     payload = part.get_payload(decode=True)
                     if payload:
                         charset = part.get_content_charset() or "utf-8"
-                        return strip_tags(payload.decode(charset, errors="replace"))
+                        html = payload.decode(charset, errors="replace")
+                        # NFC-normalize for the same reason as
+                        # decode_mime_header() above - literal accented
+                        # words like "Gravità" are matched against this
+                        # text further down.
+                        return unicodedata.normalize("NFC", strip_tags(html))
                 except Exception:
                     continue
         return ""
@@ -447,7 +462,7 @@ def parse_eml_bytes(raw_bytes: bytes, source: str) -> list[dict[str, Any]]:
                 if payload:
                     charset = part.get_content_charset() or "utf-8"
                     html = payload.decode(charset, errors="replace")
-                    plain_chunks.append(strip_tags(html))
+                    plain_chunks.append(unicodedata.normalize("NFC", strip_tags(html)))
             except Exception:
                 continue
 
@@ -538,7 +553,7 @@ def parse_pdf_bytes(raw_bytes: bytes, source: str) -> list[dict[str, Any]]:
         # of the rest of the email - the HTML body (if any) still stands.
         return []
 
-    full_text = "\n".join(lines)
+    full_text = unicodedata.normalize("NFC", "\n".join(lines))
     blocks = extract_records_from_text(full_text)
     log_excerpt = extract_log_excerpt(full_text)
     return [

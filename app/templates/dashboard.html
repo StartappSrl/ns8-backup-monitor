@@ -331,18 +331,10 @@
       return html;
     }
 
-    // Grouped by Utente, then by giorno within each user, so a customer
-    // who received several notifications on the same day stands out
-    // immediately under one "DD/MM/YYYY (N)" sub-header instead of being
-    // scattered across a flat list sorted only by time.
-    const userGroups = new Map();
-    for(const r of filtered){
-      const uKey = r.user || '—';
-      if(!userGroups.has(uKey)) userGroups.set(uKey, []);
-      userGroups.get(uKey).push(r);
-    }
-    const userKeys = Array.from(userGroups.keys()).sort((a,b)=> a.localeCompare(b));
-
+    // Grouped by Data, then by Utente within each day: for a given date
+    // you see every customer's reports clustered together, in the order
+    // the data itself already came in (respecting the current date sort
+    // direction) rather than by an alphabetical date-string sort.
     function dayKey(r){
       if(!r.timestamp) return '—';
       const d = new Date(r.timestamp);
@@ -350,28 +342,36 @@
       return d.toLocaleDateString('it-IT', {day:'2-digit',month:'2-digit',year:'numeric'});
     }
 
-    document.getElementById('tableBody').innerHTML = userKeys.map(user => {
-      const userRows = userGroups.get(user);
-      // Sub-group by day, preserving the current overall date sort order.
-      const dayGroups = new Map();
-      const dayOrder = [];
-      for(const r of userRows){
-        const dKey = dayKey(r);
-        if(!dayGroups.has(dKey)){ dayGroups.set(dKey, []); dayOrder.push(dKey); }
-        dayGroups.get(dKey).push(r);
+    const dayGroups = new Map();
+    const dayOrder = [];
+    for(const r of filtered){
+      const dKey = dayKey(r);
+      if(!dayGroups.has(dKey)){ dayGroups.set(dKey, []); dayOrder.push(dKey); }
+      dayGroups.get(dKey).push(r);
+    }
+
+    document.getElementById('tableBody').innerHTML = dayOrder.map(dKey => {
+      const dayRows = dayGroups.get(dKey);
+      // Sub-group by user within this day, alphabetically.
+      const userGroups = new Map();
+      for(const r of dayRows){
+        const uKey = r.user || '—';
+        if(!userGroups.has(uKey)) userGroups.set(uKey, []);
+        userGroups.get(uKey).push(r);
       }
-      const daysHtml = dayOrder.map(dKey => {
-        const dayRows = dayGroups.get(dKey);
-        const dayHeader = dayRows.length > 1
-          ? `<tr class="day-header-row"><td colspan="${colCount}">${escapeHtml(dKey)} <span class="group-count">(${dayRows.length} notifiche)</span></td></tr>`
-          : '';
-        return dayHeader + dayRows.map(rowHtml).join('');
+      const userKeys = Array.from(userGroups.keys()).sort((a,b)=> a.localeCompare(b));
+      const usersHtml = userKeys.map(user => {
+        const userRows = userGroups.get(user);
+        const userHeader = userRows.length > 1
+          ? `<tr class="day-header-row"><td colspan="${colCount}">${escapeHtml(user)} <span class="group-count">(${userRows.length} notifiche)</span></td></tr>`
+          : `<tr class="day-header-row"><td colspan="${colCount}">${escapeHtml(user)}</td></tr>`;
+        return userHeader + userRows.map(rowHtml).join('');
       }).join('');
       return `
         <tr class="group-header-row">
-          <td colspan="${colCount}">${escapeHtml(user)} <span class="group-count">(${userRows.length})</span></td>
+          <td colspan="${colCount}">${escapeHtml(dKey)} <span class="group-count">(${dayRows.length})</span></td>
         </tr>
-        ${daysHtml}
+        ${usersHtml}
       `;
     }).join('');
   }

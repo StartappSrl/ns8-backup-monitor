@@ -191,7 +191,7 @@ def parse_subject(subject: str) -> Optional[dict[str, str]]:
 # status trails AFTER the job id rather than leading in brackets.
 _MISSED_SCHEDULE_RE = re.compile(
     r"^(?:Scheduled backup|Il backup programmato),\s*(.*?)\s*>\s*(.*?)\s*>\s*(\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}),\s*(.*)$",
-    re.IGNORECASE,
+    re.IGNORECASE | re.DOTALL,
 )
 
 
@@ -201,9 +201,9 @@ def parse_missed_schedule_subject(subject: str) -> Optional[dict[str, str]]:
         return None
     user, set_, job_id, tail = m.groups()
     return {
-        "status": tail.strip(),
-        "user": user.strip(),
-        "set": set_.strip(),
+        "status": re.sub(r"\s+", " ", tail).strip(),
+        "user": re.sub(r"\s+", " ", user).strip(),
+        "set": re.sub(r"\s+", " ", set_).strip(),
         "jobId": job_id.strip(),
     }
 
@@ -217,7 +217,7 @@ def parse_missed_schedule_subject(subject: str) -> Optional[dict[str, str]]:
 # is the whole account's storage being over its limit, not one job.
 _ACCOUNT_QUOTA_RE = re.compile(
     r"^Account,\s*(.*?),\s*(has exceeded its backup quota)\s*$",
-    re.IGNORECASE,
+    re.IGNORECASE | re.DOTALL,
 )
 
 
@@ -226,7 +226,10 @@ def parse_account_quota_subject(subject: str) -> Optional[dict[str, str]]:
     if not m:
         return None
     user, tail = m.groups()
-    return {"user": user.strip(), "status": tail.strip()}
+    return {
+        "user": re.sub(r"\s+", " ", user).strip(),
+        "status": re.sub(r"\s+", " ", tail).strip(),
+    }
 
 
 # Yet another distinct 1Backup notification type: a purely informational
@@ -235,7 +238,7 @@ def parse_account_quota_subject(subject: str) -> Optional[dict[str, str]]:
 # No job/date, no problem to report - always INFO.
 _ACCOUNT_UPDATED_RE = re.compile(
     r"^User settings for\s*(.*?)\s*has just been updated\.?\s*$",
-    re.IGNORECASE,
+    re.IGNORECASE | re.DOTALL,
 )
 
 
@@ -243,7 +246,7 @@ def parse_account_updated_subject(subject: str) -> Optional[dict[str, str]]:
     m = _ACCOUNT_UPDATED_RE.match((subject or "").strip())
     if not m:
         return None
-    return {"user": m.group(1).strip(), "status": "User settings updated"}
+    return {"user": re.sub(r"\s+", " ", m.group(1)).strip(), "status": "User settings updated"}
 
 
 # A second, unrelated report format seen from notifiche_backup@startappitalia.it
@@ -253,7 +256,8 @@ def parse_account_updated_subject(subject: str) -> Optional[dict[str, str]]:
 # Unlike the 1Backup format, the customer/user name is the FIRST bracketed
 # token, and fields are separated by em dashes rather than ">".
 _BRACKET_DASH_SUBJECT_RE = re.compile(
-    r"^\[(.*?)\]\s*(.*?)\s*[-–—―]\s*(.*?)\s*[-–—―]\s*(\d{2}/\d{2}/\d{4})\s+(\d{2}:\d{2})\s*$"
+    r"^\[(.*?)\]\s*(.*?)\s*[-–—―]\s*(.*?)\s*[-–—―]\s*(\d{2}/\d{2}/\d{4})\s+(\d{2}:\d{2})\s*$",
+    re.DOTALL,
 )
 
 
@@ -263,9 +267,9 @@ def parse_bracket_dash_subject(subject: str) -> Optional[dict[str, str]]:
         return None
     user, status, job, date_str, time_str = m.groups()
     return {
-        "user": user.strip(),
+        "user": re.sub(r"\s+", " ", user).strip(),
         "status": re.sub(r"\s+", " ", status).strip(),
-        "set": job.strip(),
+        "set": re.sub(r"\s+", " ", job).strip(),
         "date": date_str.strip(),
         "time": time_str.strip(),
     }

@@ -24,7 +24,7 @@ import email
 import re
 from email.header import decode_header, make_header
 from email.message import Message
-from email.utils import parsedate_to_datetime
+from email.utils import parseaddr, parsedate_to_datetime
 from typing import Any, Optional
 
 # Canonical field name each label maps to. "Backup Time" (used in the HTML
@@ -82,16 +82,20 @@ OK_KEYS = [
 
 def classify_severity(status_text: str) -> str:
     s = (status_text or "").lower().strip()
-    if any(k in s for k in CRITICAL_KEYS):
+    # Some senders (e.g. the "SQL Master Backup" / "SQL Server Management
+    # Tool" notifications) use a status emoji instead of/alongside English
+    # or Italian keywords - checked alongside the keyword lists, not
+    # instead of them, since a status can carry both.
+    if any(k in s for k in CRITICAL_KEYS) or "❌" in s or "🔴" in s:
         return "CRITICAL"
-    if any(k in s for k in WARNING_KEYS):
+    if any(k in s for k in WARNING_KEYS) or "⚠" in s:
         return "WARNING"
     # "OK" is often followed by parenthetical detail, e.g.
     # "OK (no files backed up)" / "OK (nessun file sottoposto a backup)" -
     # match it as a prefix rather than requiring an exact "ok" status.
     if s.startswith("ok"):
         return "OK"
-    if any(k in s for k in OK_KEYS):
+    if any(k in s for k in OK_KEYS) or "✅" in s:
         return "OK"
     return "INFO"
 
@@ -178,16 +182,102 @@ def parse_subject(subject: str) -> Optional[dict[str, str]]:
     }
 
 
+# A second, unrelated report format seen from notifiche_backup@startappitalia.it
+# ("SQL Master Backup" / "SQL Server Management Tool" notifications), e.g.:
+#   "[LOGGIA] ✅ SQL COMPLETATO — Backup DB Principali (FULL) — 18/09/2026 22:05"
+#   "[NAICI SRL] ✅ SQL COMPLETATO — Pianificazione (2 DB) — 19/09/2026 02:03"
+# Unlike the 1Backup format, the customer/user name is the FIRST bracketed
+# token, and fields are separated by em dashes rather than ">".
+_BRACKET_DASH_SUBJECT_RE = re.compile(
+    r"^\[(.*?)\]\s*(.*?)\s*—\s*(.*?)\s*—\s*(\d{2}/\d{2}/\d{4})\s+(\d{2}:\d{2})\s*$"
+)
+
+
+def parse_bracket_dash_subject(subject: str) -> Optional[dict[str, str]]:
+    m = _BRACKET_DASH_SUBJECT_RE.match((subject or "").strip())
+    if not m:
+        return None
+    user, status, job, date_str, time_str = m.groups()
+    return {
+        "user": user.strip(),
+        "status": re.sub(r"\s+", " ", status).strip(),
+        "set": job.strip(),
+        "date": date_str.strip(),
+        "time": time_str.strip(),
+    }
+
+
+def extract_sql_backup_detail(raw_text: str) -> str:
+    """Pull the free-form "Dettaglio:" section out of a bracket-dash-format
+    body (see parse_bracket_dash_subject) - the per-database breakdown
+    that the header status line alone doesn't carry, similar in spirit to
+    extract_log_excerpt() for the PDF-based format."""
+    m = re.search(r"Dettaglio:\s*\n+(.*?)\s*Messaggio automatico", raw_text, re.DOTALL)
+    if not m:
+        return ""
+    lines = [l.strip() for l in m.group(1).split("\n") if l.strip()]
+    return " | ".join(lines)
+
+
+# A third, unrelated report format: QNAP NAS "Hybrid Backup Sync" device
+# notifications, e.g. subject "[Info][Hybrid Backup Sync] Notifica dal
+# dispositivo: NASQNAP" with a body of colon-separated "Label: value"
+# lines (Nome NAS / Gravità / Data/Ora / Nome App / Categoria / Messaggio).
+# Detected by the presence of "Gravità:" - the customer/user here is the
+# EMAIL SENDER address itself (e.g. elio@inlinea.tv), not anything in the
+# subject or body, since QNAP devices are typically configured to send
+# their own notifications directly from an owner's mailbox.
+_QNAP_FIELD_RE = re.compile(
+    r"^(Nome NAS|Gravità|Data/Ora|Nome App|Categoria)\s*:\s*(.*)$"
+)
+_QNAP_SEVERITY_MAP = {
+    "info": "INFO",
+    "informazioni": "INFO",
+    "avviso": "WARNING",
+    "warning": "WARNING",
+    "errore": "CRITICAL",
+    "error": "CRITICAL",
+}
+
+
+def parse_qnap_notification(raw_text: str) -> Optional[dict[str, str]]:
+    if "Gravità" not in raw_text:
+        return None
+
+    fields: dict[str, str] = {}
+    for line in raw_text.split("\n"):
+        m = _QNAP_FIELD_RE.match(line.strip())
+        if m:
+            fields[m.group(1)] = m.group(2).strip()
+
+    if "Gravità" not in fields:
+        return None
+
+    msg_match = re.search(r"Messaggio:\s*(.*?)(?:\n\s*\n|\Z)", raw_text, re.DOTALL)
+    message = re.sub(r"\s+", " ", msg_match.group(1)).strip() if msg_match else ""
+
+    return {
+        "nas_name": fields.get("Nome NAS", ""),
+        "severity_label": fields.get("Gravità", ""),
+        "date_time": fields.get("Data/Ora", ""),
+        "app_name": fields.get("Nome App", ""),
+        "category": fields.get("Categoria", ""),
+        "message": message,
+    }
+
+
 def normalize_timestamp(raw: str) -> str:
-    """Normalize the two date formats seen in these reports into a single
-    sortable ISO 8601 string (YYYY-MM-DDTHH:MM:SS), so the dashboard can
-    reliably sort/compare dates regardless of which field they came from:
+    """Normalize the date formats seen across supported report formats into
+    a single sortable ISO 8601 string (YYYY-MM-DDTHH:MM:SS), so the
+    dashboard can reliably sort/compare dates regardless of which field or
+    sender format they came from:
 
-      - "17/09/2026 23:10:22 CEST"  (from the "Start - End" field)
-      - "2026-09-17-23-00-00"       (from the "Backup Job" field, used as
+      - "17/09/2026 23:10:22 CEST"  (1Backup "Start - End" field)
+      - "2026-09-17-23-00-00"       (1Backup "Backup Job" field, used as
                                       a fallback when Start - End is absent)
+      - "2026/09/18 21:00:36"       (QNAP "Data/Ora" field)
 
-    Anything not matching either pattern is returned unchanged.
+    Anything not matching a known pattern is returned unchanged.
     """
     raw = (raw or "").strip()
     if not raw:
@@ -196,6 +286,11 @@ def normalize_timestamp(raw: str) -> str:
     m = re.match(r"^(\d{2})/(\d{2})/(\d{4})\s+(\d{2}):(\d{2}):(\d{2})", raw)
     if m:
         day, month, year, hh, mm, ss = m.groups()
+        return f"{year}-{month}-{day}T{hh}:{mm}:{ss}"
+
+    m = re.match(r"^(\d{4})/(\d{2})/(\d{2})\s+(\d{2}):(\d{2}):(\d{2})", raw)
+    if m:
+        year, month, day, hh, mm, ss = m.groups()
         return f"{year}-{month}-{day}T{hh}:{mm}:{ss}"
 
     m = re.match(r"^(\d{4})-(\d{2})-(\d{2})-(\d{2})-(\d{2})-(\d{2})$", raw)
@@ -269,6 +364,78 @@ def parse_eml_bytes(raw_bytes: bytes, source: str) -> list[dict[str, Any]]:
     msg: Message = email.message_from_bytes(raw_bytes)
     subject = decode_mime_header(msg.get("Subject", "") or "")
     date_header = msg.get("Date", "") or ""
+
+    def get_body_text() -> str:
+        for part in msg.walk():
+            if part.get_content_type() == "text/html":
+                try:
+                    payload = part.get_payload(decode=True)
+                    if payload:
+                        charset = part.get_content_charset() or "utf-8"
+                        return strip_tags(payload.decode(charset, errors="replace"))
+                except Exception:
+                    continue
+        return ""
+
+    # QNAP NAS "Hybrid Backup Sync" device notifications (see
+    # parse_qnap_notification) - checked before the other formats since
+    # its detection is based on the BODY containing "Gravità:", not the
+    # subject, and its "user" is the sender's own email address rather
+    # than anything extracted from the message content at all.
+    body_text = get_body_text()
+    qnap = parse_qnap_notification(body_text) if body_text else None
+    if qnap:
+        from_addr = parseaddr(msg.get("From", "") or "")[1]
+        severity = _QNAP_SEVERITY_MAP.get(qnap["severity_label"].lower())
+        status = qnap["message"] or qnap["severity_label"]
+        if severity is None:
+            severity = classify_severity(status)
+        return [{
+            "natural_key": "|".join([
+                _clean_key_part(source), _clean_key_part(date_header or subject), "",
+            ]),
+            "source": source,
+            "timestamp": normalize_timestamp(qnap["date_time"]),
+            "user": from_addr or qnap["nas_name"],
+            "backup_set": qnap["nas_name"] or qnap["app_name"],
+            "destination": "",
+            "status": status,
+            "data_size": "",
+            "ip_address": "",
+            "start_end": "",
+            "job_id": "",
+            "severity": severity,
+            "log_excerpt": f"{qnap['app_name']} — {qnap['category']}".strip(" —"),
+        }]
+
+    # The "SQL Master Backup" / "SQL Server Management Tool" notifications
+    # use a completely different subject AND body layout from the 1Backup
+    # format (see parse_bracket_dash_subject) - handled as its own path
+    # entirely, since the LABEL_MAP-based body extraction below doesn't
+    # apply to it at all (different field labels, no "Job Status" etc.).
+    bracket_parsed = parse_bracket_dash_subject(subject)
+    if bracket_parsed:
+        detail = extract_sql_backup_detail(body_text) if body_text else ""
+        raw_timestamp = f"{bracket_parsed['date']} {bracket_parsed['time']}:00"
+        status = bracket_parsed["status"]
+        return [{
+            "natural_key": "|".join([
+                _clean_key_part(source), _clean_key_part(date_header or subject), "",
+            ]),
+            "source": source,
+            "timestamp": normalize_timestamp(raw_timestamp),
+            "user": bracket_parsed["user"],
+            "backup_set": bracket_parsed["set"],
+            "destination": "",
+            "status": status,
+            "data_size": "",
+            "ip_address": "",
+            "start_end": "",
+            "job_id": "",
+            "severity": classify_severity(status),
+            "log_excerpt": detail,
+        }]
+
     subj_parsed = parse_subject(subject)
 
     plain_chunks: list[str] = []

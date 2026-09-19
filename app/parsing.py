@@ -632,3 +632,4 @@ def parse_email_message(raw_bytes: bytes, source: str) -> list[dict[str, Any]]:
                     existing["log_excerpt"] = r["log_excerpt"]
 
     return records
+  

@@ -74,6 +74,13 @@
   .chip[data-sev="INFO"].active{background:var(--info-bg); color:var(--info); border-color:var(--info);}
   select, input[type=text]{font-family:inherit; font-size:12.5px; padding:6px 10px; border-radius:7px; border:1px solid var(--border); background:var(--panel-2); color:var(--text);}
   .spacer{flex:1;}
+  .scan-now-btn{
+    font-family:inherit; font-size:12.5px; font-weight:600; color:white;
+    background:var(--accent); border:none; border-radius:7px; padding:7px 14px;
+    cursor:pointer;
+  }
+  .scan-now-btn:hover{filter:brightness(1.08);}
+  .scan-now-btn:disabled{opacity:0.6; cursor:default;}
   .panel{background:var(--panel); border:1px solid var(--border); border-radius:8px; overflow-x:auto;}
   table{width:100%; border-collapse:collapse; font-size:13px; table-layout:fixed;}
   .col-sev{width:92px;}
@@ -160,6 +167,7 @@
     <select id="destFilter"><option value="">Tutte le destinazioni</option></select>
     <input type="text" id="searchBox" placeholder="Cerca utente o backup set…" />
     <div class="spacer"></div>
+    <button id="scanNowBtn" class="scan-now-btn">Avvia scansione ora</button>
   </div>
 
   <div class="panel">
@@ -195,6 +203,26 @@
   });
   document.getElementById('destFilter').addEventListener('change', render);
   document.getElementById('searchBox').addEventListener('input', render);
+
+  document.getElementById('scanNowBtn').addEventListener('click', async ()=>{
+    const btn = document.getElementById('scanNowBtn');
+    btn.disabled = true;
+    const originalText = btn.textContent;
+    btn.textContent = 'Scansione avviata…';
+    try{
+      await fetch('/api/scan-now', {method:'POST', credentials:'same-origin'});
+    }catch(e){
+      // ignore - the button re-enabling below still gives the person a
+      // clear "something happened" signal either way
+    }
+    // Give the poller a little time to actually connect and start
+    // processing before refreshing, then restore the button.
+    setTimeout(()=>{
+      load();
+      btn.disabled = false;
+      btn.textContent = originalText;
+    }, 8000);
+  });
 
   function escapeHtml(s){
     return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));

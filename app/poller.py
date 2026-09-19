@@ -87,11 +87,19 @@ def connect_imap() -> imaplib.IMAP4:
     use_ssl = env_bool("IMAP_SSL", True)
     username = os.environ["IMAP_USERNAME"]
     password = os.environ["IMAP_PASSWORD"]
+    # Without an explicit timeout, imaplib's underlying socket blocks
+    # forever on a stalled connection or a server that stops responding
+    # mid-command - the poller has been observed staying "active (running)"
+    # for hours with no new log output at all after such a hang, since
+    # nothing ever raises to be caught by run_cycle's own error handling
+    # or the outer loop. This applies to every subsequent read/write on
+    # the connection, not just the initial connect.
+    timeout = int(os.environ.get("IMAP_TIMEOUT", "60"))
 
     if use_ssl:
-        conn = imaplib.IMAP4_SSL(host, port)
+        conn = imaplib.IMAP4_SSL(host, port, timeout=timeout)
     else:
-        conn = imaplib.IMAP4(host, port)
+        conn = imaplib.IMAP4(host, port, timeout=timeout)
         try:
             conn.starttls()
         except imaplib.IMAP4.error:

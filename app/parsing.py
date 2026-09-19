@@ -60,15 +60,15 @@ CRITICAL_KEYS = [
     # English
     "failed", "error", "could not", "cannot", "unable", "corrupt",
     "denied", "timeout", "timed out", "disk full", "not enough space",
-    "authentication",
+    "authentication", "missed",
     # Italiano
     "fallito", "fallita", "errore", "impossibile", "corrotto", "negato",
-    "scaduto", "spazio esaurito", "autenticazione",
+    "scaduto", "spazio esaurito", "autenticazione", "non è stato effettuato",
 ]
 WARNING_KEYS = [
     # English
     "skipped", "still running", "warning", "quota", "partial", "retry",
-    "delayed", "exceeded", "missed",
+    "delayed", "exceeded",
     # Italiano
     "saltato", "saltata", "ancora in corso", "attenzione", "parziale",
     "ritardo", "superata", "superato",
@@ -189,7 +189,7 @@ def parse_subject(subject: str) -> Optional[dict[str, str]]:
 # No brackets, no leading "Backup Report"/"Report di backup", and the
 # status trails AFTER the job id rather than leading in brackets.
 _MISSED_SCHEDULE_RE = re.compile(
-    r"^Scheduled backup,\s*(.*?)\s*>\s*(.*?)\s*>\s*(\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}),\s*(.*)$",
+    r"^(?:Scheduled backup|Il backup programmato),\s*(.*?)\s*>\s*(.*?)\s*>\s*(\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}),\s*(.*)$",
     re.IGNORECASE,
 )
 
@@ -205,6 +205,27 @@ def parse_missed_schedule_subject(subject: str) -> Optional[dict[str, str]]:
         "set": set_.strip(),
         "jobId": job_id.strip(),
     }
+
+
+# Another distinct 1Backup notification type: an ACCOUNT-level (not a
+# single job's) quota being exceeded, e.g.:
+#   "Account, aurogene, has exceeded its backup quota"
+# Comma-separated, no job/date at all - always treated as CRITICAL
+# regardless of the generic keyword-based classification (which treats a
+# single job's "quota"/"exceeded" mention as only a WARNING), since this
+# is the whole account's storage being over its limit, not one job.
+_ACCOUNT_QUOTA_RE = re.compile(
+    r"^Account,\s*(.*?),\s*(has exceeded its backup quota)\s*$",
+    re.IGNORECASE,
+)
+
+
+def parse_account_quota_subject(subject: str) -> Optional[dict[str, str]]:
+    m = _ACCOUNT_QUOTA_RE.match((subject or "").strip())
+    if not m:
+        return None
+    user, tail = m.groups()
+    return {"user": user.strip(), "status": tail.strip()}
 
 
 # A second, unrelated report format seen from notifiche_backup@startappitalia.it
@@ -475,6 +496,36 @@ def parse_eml_bytes(raw_bytes: bytes, source: str) -> list[dict[str, Any]]:
             "log_excerpt": detail,
         }]
 
+    # Account-level quota-exceeded notification (see
+    # parse_account_quota_subject) - always CRITICAL, not run through the
+    # generic keyword classifier, since this is a distinct, more serious
+    # condition than a single job's destination-quota warning.
+    account_quota = parse_account_quota_subject(subject)
+    if account_quota:
+        status = account_quota["status"]
+        try:
+            dt = parsedate_to_datetime(date_header) if date_header else None
+            timestamp = dt.strftime("%Y-%m-%dT%H:%M:%S") if dt else ""
+        except (TypeError, ValueError):
+            timestamp = ""
+        return [{
+            "natural_key": "|".join([
+                _clean_key_part(source), _clean_key_part(date_header or subject), "",
+            ]),
+            "source": source,
+            "timestamp": timestamp,
+            "user": account_quota["user"],
+            "backup_set": "",
+            "destination": "",
+            "status": status,
+            "data_size": "",
+            "ip_address": "",
+            "start_end": "",
+            "job_id": "",
+            "severity": "CRITICAL",
+            "log_excerpt": "",
+        }]
+
     subj_parsed = parse_subject(subject) or parse_missed_schedule_subject(subject)
 
     plain_chunks: list[str] = []
@@ -650,9 +701,20 @@ def parse_email_message(raw_bytes: bytes, source: str) -> list[dict[str, Any]]:
             pdf_records = parse_pdf_bytes(payload, f"{source}::{filename}")
             for r in pdf_records:
                 existing = _find_matching_record(records, r["destination"])
-                if existing is None:
+                if existing is not None:
+                    if not existing.get("log_excerpt") and r.get("log_excerpt"):
+                        existing["log_excerpt"] = r["log_excerpt"]
+                elif r["severity"] in ("WARNING", "CRITICAL"):
+                    # An unmatched PDF record with a genuine problem is a
+                    # real destination the HTML body didn't mention at
+                    # all, worth surfacing on its own. An unmatched OK/
+                    # INFO one is, in practice, almost always the SAME
+                    # destination the body already captured cleanly,
+                    # just under a slightly different PDF-only spelling
+                    # that _find_matching_record's prefix check didn't
+                    # catch - appending it would just duplicate an
+                    # already-correct row under an ugly "::file.pdf"
+                    # source, with nothing new to show.
                     records.append(r)
-                elif not existing.get("log_excerpt") and r.get("log_excerpt"):
-                    existing["log_excerpt"] = r["log_excerpt"]
 
     return records

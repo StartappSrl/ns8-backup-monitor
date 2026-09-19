@@ -81,7 +81,7 @@
   .col-user{width:110px;}
   .col-backupset{width:160px;}
   .col-dest{width:130px;}
-  .col-size{width:110px;}
+  .col-size{width:95px;}
   thead th{text-align:left; font-size:11px; font-weight:600; color:var(--text-faint); padding:10px 14px; border-bottom:1px solid var(--border); background:var(--panel-2); white-space:nowrap;}
   thead th.sortable{cursor:pointer; user-select:none;}
   thead th.sortable:hover{color:var(--text);}
@@ -89,6 +89,10 @@
   .group-header-row td{
     background:var(--panel-2); font-family:'IBM Plex Mono', monospace; font-size:11.5px;
     font-weight:600; color:var(--text-muted); padding:8px 14px; border-bottom:1px solid var(--border);
+  }
+  .day-header-row td{
+    background:var(--warning-bg); font-family:'IBM Plex Mono', monospace; font-size:11px;
+    font-weight:600; color:var(--warning); padding:6px 14px 6px 28px; border-bottom:1px solid var(--border);
   }
   .group-count{font-weight:400; color:var(--text-faint);}
   tbody tr{border-bottom:1px solid var(--border);}
@@ -114,11 +118,14 @@
   .log-excerpt{margin-top:12px; padding-top:12px; border-top:1px solid var(--border);}
   .log-excerpt-label{font-size:11px; color:var(--text-faint); margin-bottom:6px;}
   .log-excerpt pre{
-    margin:0; font-family:'IBM Plex Mono', monospace; font-size:11.5px; color:var(--critical);
-    background:var(--critical-bg); border-radius:6px; padding:10px 12px; max-width:100%;
+    margin:0; font-family:'IBM Plex Mono', monospace; font-size:11.5px; color:var(--text-muted);
+    background:var(--panel-2); border-radius:6px; padding:10px 12px; max-width:100%;
     max-height:220px; overflow-y:auto; overflow-x:hidden; white-space:pre-wrap;
     word-break:break-word; overflow-wrap:anywhere;
   }
+  .log-excerpt.CRITICAL pre{color:var(--critical); background:var(--critical-bg);}
+  .log-excerpt.WARNING pre{color:var(--warning); background:var(--warning-bg);}
+  .log-excerpt.OK pre{color:var(--ok); background:var(--ok-bg);}
   .empty-state{padding:50px 20px; text-align:center; color:var(--text-faint);}
 </style>
 </head>
@@ -259,11 +266,10 @@
     const dir = sortDir === 'asc' ? 1 : -1;
     filtered.sort((a,b)=> dir * (new Date(a.timestamp||0) - new Date(b.timestamp||0)));
 
-    const groupBySender = currentSenders.length > 1 && !activeSender;
     const headRow = document.getElementById('tableHeadRow');
     headRow.innerHTML = '<th class="col-sev">Gravità</th>' +
       `<th class="sortable col-time" id="dateHeader">Data / ora <span class="sort-arrow">${sortDir === 'desc' ? '▾' : '▴'}</span></th>` +
-      (groupBySender ? '' : '<th class="col-user">Utente</th>') +
+      '<th class="col-user">Utente</th>' +
       '<th class="col-backupset">Backup set</th><th class="col-dest">Destinazione</th><th class="col-status">Stato</th><th class="col-size">Dati</th>';
     document.getElementById('dateHeader').addEventListener('click', ()=>{
       sortDir = sortDir === 'desc' ? 'asc' : 'desc';
@@ -281,15 +287,16 @@
     table.style.display = 'table';
     empty.style.display = 'none';
 
+    const colCount = 7; // Gravità, Data/ora, Utente, Backup set, Destinazione, Stato, Dati
+
     function rowHtml(r){
       const key = r.natural_key;
       const isOpen = expandedKeys.has(key);
-      const colSpanCount = groupBySender ? 6 : 7;
       let html = `
         <tr class="report-row" data-key="${escapeHtml(key)}">
           <td><span class="sev-label ${r.severity}">${sevLabelIt(r.severity)}</span></td>
           <td class="cell-time">${escapeHtml(formatTs(r.timestamp))}</td>
-          ${groupBySender ? '' : `<td class="cell-user">${escapeHtml(r.user||'—')}</td>`}
+          <td class="cell-user">${escapeHtml(r.user||'—')}</td>
           <td class="cell-backupset">${escapeHtml(r.backup_set||'—')}</td>
           <td class="cell-dest">${escapeHtml(r.destination||'—')}</td>
           <td class="cell-status">
@@ -302,7 +309,7 @@
       if(isOpen){
         html += `
           <tr class="detail-row" data-key="${escapeHtml(key)}">
-            <td colspan="${colSpanCount}">
+            <td colspan="${colCount}">
               <dl class="detail-grid">
                 <dt>Stato completo</dt><dd>${escapeHtml(r.status||'—')}</dd>
                 <dt>Mittente</dt><dd class="mono">${escapeHtml(r.sender||'—')}</dd>
@@ -312,8 +319,8 @@
                 <dt>Sorgente</dt><dd>${escapeHtml(r.source||'—')}</dd>
               </dl>
               ${r.log_excerpt ? `
-                <div class="log-excerpt">
-                  <div class="log-excerpt-label">Righe di log rilevanti (dal PDF)</div>
+                <div class="log-excerpt ${r.severity}">
+                  <div class="log-excerpt-label">Dettagli aggiuntivi</div>
                   <pre>${escapeHtml(r.log_excerpt)}</pre>
                 </div>
               ` : ''}
@@ -324,28 +331,49 @@
       return html;
     }
 
-    if(!groupBySender){
-      document.getElementById('tableBody').innerHTML = filtered.map(rowHtml).join('');
-      return;
+    // Grouped by Utente, then by giorno within each user, so a customer
+    // who received several notifications on the same day stands out
+    // immediately under one "DD/MM/YYYY (N)" sub-header instead of being
+    // scattered across a flat list sorted only by time.
+    const userGroups = new Map();
+    for(const r of filtered){
+      const uKey = r.user || '—';
+      if(!userGroups.has(uKey)) userGroups.set(uKey, []);
+      userGroups.get(uKey).push(r);
+    }
+    const userKeys = Array.from(userGroups.keys()).sort((a,b)=> a.localeCompare(b));
+
+    function dayKey(r){
+      if(!r.timestamp) return '—';
+      const d = new Date(r.timestamp);
+      if(isNaN(d.getTime())) return '—';
+      return d.toLocaleDateString('it-IT', {day:'2-digit',month:'2-digit',year:'numeric'});
     }
 
-    // Grouped view: one section per sender, in alphabetical order, each
-    // showing its own report count and keeping the current date sort
-    // within the group.
-    const groups = new Map();
-    for(const r of filtered){
-      const key = r.sender || '—';
-      if(!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(r);
-    }
-    const senderKeys = Array.from(groups.keys()).sort();
-    const colCount = 6; // Gravità, Data/ora, Backup set, Destinazione, Stato, Dati
-    document.getElementById('tableBody').innerHTML = senderKeys.map(sender => `
-      <tr class="group-header-row">
-        <td colspan="${colCount}">${escapeHtml(sender)} <span class="group-count">(${groups.get(sender).length})</span></td>
-      </tr>
-      ${groups.get(sender).map(rowHtml).join('')}
-    `).join('');
+    document.getElementById('tableBody').innerHTML = userKeys.map(user => {
+      const userRows = userGroups.get(user);
+      // Sub-group by day, preserving the current overall date sort order.
+      const dayGroups = new Map();
+      const dayOrder = [];
+      for(const r of userRows){
+        const dKey = dayKey(r);
+        if(!dayGroups.has(dKey)){ dayGroups.set(dKey, []); dayOrder.push(dKey); }
+        dayGroups.get(dKey).push(r);
+      }
+      const daysHtml = dayOrder.map(dKey => {
+        const dayRows = dayGroups.get(dKey);
+        const dayHeader = dayRows.length > 1
+          ? `<tr class="day-header-row"><td colspan="${colCount}">${escapeHtml(dKey)} <span class="group-count">(${dayRows.length} notifiche)</span></td></tr>`
+          : '';
+        return dayHeader + dayRows.map(rowHtml).join('');
+      }).join('');
+      return `
+        <tr class="group-header-row">
+          <td colspan="${colCount}">${escapeHtml(user)} <span class="group-count">(${userRows.length})</span></td>
+        </tr>
+        ${daysHtml}
+      `;
+    }).join('');
   }
 
   // Delegated click handler: attached once to the (persistent) tableBody

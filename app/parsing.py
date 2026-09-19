@@ -68,7 +68,7 @@ CRITICAL_KEYS = [
 WARNING_KEYS = [
     # English
     "skipped", "still running", "warning", "quota", "partial", "retry",
-    "delayed", "exceeded",
+    "delayed", "exceeded", "missed",
     # Italiano
     "saltato", "saltata", "ancora in corso", "attenzione", "parziale",
     "ritardo", "superata", "superato",
@@ -180,6 +180,30 @@ def parse_subject(subject: str) -> Optional[dict[str, str]]:
         "user": m.group(2).strip(),
         "set": m.group(3).strip(),
         "jobId": m.group(4).strip(),
+    }
+
+
+# A distinct 1Backup notification type for a schedule that never even ran
+# (as opposed to a completed/skipped/interrupted job): e.g.
+#   "Scheduled backup, ltvetecube > BUS > 2026-09-08-13-15-00, was missed"
+# No brackets, no leading "Backup Report"/"Report di backup", and the
+# status trails AFTER the job id rather than leading in brackets.
+_MISSED_SCHEDULE_RE = re.compile(
+    r"^Scheduled backup,\s*(.*?)\s*>\s*(.*?)\s*>\s*(\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}),\s*(.*)$",
+    re.IGNORECASE,
+)
+
+
+def parse_missed_schedule_subject(subject: str) -> Optional[dict[str, str]]:
+    m = _MISSED_SCHEDULE_RE.match((subject or "").strip())
+    if not m:
+        return None
+    user, set_, job_id, tail = m.groups()
+    return {
+        "status": tail.strip(),
+        "user": user.strip(),
+        "set": set_.strip(),
+        "jobId": job_id.strip(),
     }
 
 
@@ -451,7 +475,7 @@ def parse_eml_bytes(raw_bytes: bytes, source: str) -> list[dict[str, Any]]:
             "log_excerpt": detail,
         }]
 
-    subj_parsed = parse_subject(subject)
+    subj_parsed = parse_subject(subject) or parse_missed_schedule_subject(subject)
 
     plain_chunks: list[str] = []
     for part in msg.walk():
@@ -632,4 +656,3 @@ def parse_email_message(raw_bytes: bytes, source: str) -> list[dict[str, Any]]:
                     existing["log_excerpt"] = r["log_excerpt"]
 
     return records
-  

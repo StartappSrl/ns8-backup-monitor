@@ -25,6 +25,7 @@ from functools import wraps
 from flask import Flask, g, redirect, render_template, request, session, url_for, jsonify
 
 import authlib
+import poller
 from db import get_db
 
 SECRET_KEY_PATH = os.environ.get("FLASK_SECRET_KEY_PATH", "/state/flask_secret_key")
@@ -261,6 +262,12 @@ def create_app() -> Flask:
             "reports": rows, "summary": summary,
             "destinations": destinations, "senders": senders,
         })
+
+    @app.route("/api/scan-now", methods=["POST"])
+    @login_required
+    def api_scan_now():
+        poller.trigger_scan_now()
+        return jsonify({"status": "ok"})
 
     @app.route("/healthz")
     def healthz():

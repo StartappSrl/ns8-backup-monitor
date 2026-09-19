@@ -54,6 +54,7 @@ IGNORE_LINES = {
     "backup set settings",
     "backup logs",
     "backup files",
+    "user interrupted",
 }
 
 CRITICAL_KEYS = [

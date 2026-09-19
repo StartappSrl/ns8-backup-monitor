@@ -34,6 +34,7 @@ import os
 import signal
 import sqlite3
 import sys
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from email.header import decode_header
@@ -49,6 +50,17 @@ logging.basicConfig(
 log = logging.getLogger("backup-monitor")
 
 _running = True
+
+# Set by trigger_scan_now() (called from the web app's "Scansiona ora"
+# button) to cut the sleep between cycles short instead of waiting out
+# the rest of POLL_INTERVAL - checked once per second in main()'s sleep
+# loop below.
+_scan_now = threading.Event()
+
+
+def trigger_scan_now() -> None:
+    """Ask the poller loop to start its next cycle immediately."""
+    _scan_now.set()
 
 
 def _handle_signal(signum, frame):
@@ -287,6 +299,10 @@ def main() -> None:
         sleep_for = max(5, poll_interval - elapsed)
         for _ in range(int(sleep_for)):
             if not _running:
+                break
+            if _scan_now.is_set():
+                _scan_now.clear()
+                log.info("Manual scan requested - starting next cycle now.")
                 break
             time.sleep(1)
 

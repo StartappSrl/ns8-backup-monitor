@@ -69,10 +69,10 @@ CRITICAL_KEYS = [
 WARNING_KEYS = [
     # English
     "skipped", "still running", "warning", "quota", "partial", "retry",
-    "delayed", "exceeded",
+    "delayed", "exceeded", "interrupted",
     # Italiano
     "saltato", "saltata", "ancora in corso", "attenzione", "parziale",
-    "ritardo", "superata", "superato",
+    "ritardo", "superata", "superato", "interrotto", "interrotta",
 ]
 OK_KEYS = [
     # English

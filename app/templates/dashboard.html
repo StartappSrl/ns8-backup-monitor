@@ -70,7 +70,11 @@
   .chip[data-sev="WARNING"].active{background:var(--warning-bg); color:var(--warning); border-color:var(--warning);}
   .chip[data-sev="OK"].active{background:var(--ok-bg); color:var(--ok); border-color:var(--ok);}
   .chip[data-sev="INFO"].active{background:var(--info-bg); color:var(--info); border-color:var(--info);}
-  select, input[type=text]{font-family:inherit; font-size:12.5px; padding:6px 10px; border-radius:7px; border:1px solid var(--border); background:var(--panel-2); color:var(--text);}
+  select, input[type=text], input[type=date]{font-family:inherit; font-size:12.5px; padding:6px 10px; border-radius:7px; border:1px solid var(--border); background:var(--panel-2); color:var(--text);}
+  .window-filter{display:flex; align-items:center; gap:8px;}
+  .window-filter label{font-size:12.5px; color:var(--text-muted); white-space:nowrap;}
+  .window-hint{font-size:11.5px; color:var(--text-faint); white-space:nowrap;}
+  .window-hint strong{color:var(--accent); font-weight:700;}
   .spacer{flex:1;}
   .scan-now-btn{
     font-family:inherit; font-size:12.5px; font-weight:600; color:white;
@@ -165,6 +169,11 @@
     <div class="chip active" data-sev="INFO">Info <span class="dot"></span></div>
     <select id="destFilter"><option value="">Tutte le destinazioni</option></select>
     <input type="text" id="searchBox" placeholder="Cerca utente o backup set…" />
+    <div class="window-filter">
+      <label for="windowDateFilter">Notte del</label>
+      <input type="date" id="windowDateFilter" />
+      <span id="windowHint" class="window-hint"></span>
+    </div>
     <div class="spacer"></div>
     <button id="scanNowBtn" class="scan-now-btn">Avvia scansione ora</button>
   </div>
@@ -202,6 +211,21 @@
   });
   document.getElementById('destFilter').addEventListener('change', render);
   document.getElementById('searchBox').addEventListener('input', render);
+  document.getElementById('windowDateFilter').addEventListener('change', render);
+
+  // Computes the "notte" (backup night) window for a given YYYY-MM-DD
+  // calendar date: 13:00 on the day BEFORE it, through 06:00 on the
+  // date itself - e.g. selecting 23/09 covers 22/09 13:00 -> 23/09 06:00,
+  // matching when overnight backup jobs actually run.
+  function windowBounds(dateStr){
+    const selected = new Date(dateStr + 'T00:00:00');
+    const start = new Date(selected);
+    start.setDate(start.getDate() - 1);
+    start.setHours(13, 0, 0, 0);
+    const end = new Date(selected);
+    end.setHours(6, 0, 0, 0);
+    return {start, end};
+  }
 
   document.getElementById('scanNowBtn').addEventListener('click', async ()=>{
     const btn = document.getElementById('scanNowBtn');
@@ -288,14 +312,33 @@
   function render(){
     const q = document.getElementById('searchBox').value.trim().toLowerCase();
     const destVal = document.getElementById('destFilter').value;
+    const windowDateVal = document.getElementById('windowDateFilter').value;
+    let windowRange = null;
+    if(windowDateVal){
+      windowRange = windowBounds(windowDateVal);
+    }
     const filtered = allReports.filter(r=>{
       if(!activeSevs.has(r.severity)) return false;
       if(destVal && r.destination !== destVal) return false;
       if(q && !((r.user||'').toLowerCase().includes(q) || (r.backup_set||'').toLowerCase().includes(q))) return false;
+      if(windowRange){
+        if(!r.timestamp) return false;
+        const d = new Date(r.timestamp);
+        if(isNaN(d.getTime()) || d < windowRange.start || d > windowRange.end) return false;
+      }
       return true;
     });
     const dir = sortDir === 'asc' ? 1 : -1;
     filtered.sort((a,b)=> dir * (new Date(a.timestamp||0) - new Date(b.timestamp||0)));
+
+    const windowHint = document.getElementById('windowHint');
+    if(windowRange){
+      const distinctAgents = new Set(filtered.map(r=>r.user || '—')).size;
+      const fmt = d => d.toLocaleString('it-IT', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+      windowHint.innerHTML = `${fmt(windowRange.start)} → ${fmt(windowRange.end)} · <strong>${distinctAgents}</strong> client${distinctAgents===1?'':'i'} distinti`;
+    } else {
+      windowHint.textContent = '';
+    }
 
     const headRow = document.getElementById('tableHeadRow');
     headRow.innerHTML = '<th class="col-sev">Gravità</th>' +

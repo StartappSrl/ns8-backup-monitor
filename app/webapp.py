@@ -23,6 +23,7 @@ import time
 from functools import wraps
 
 from flask import Flask, g, redirect, render_template, request, session, url_for, jsonify
+from flask_wtf import CSRFProtect
 
 import authlib
 import poller
@@ -58,6 +59,40 @@ def create_app() -> Flask:
         SESSION_COOKIE_SECURE=os.environ.get("INSECURE_HTTP") != "true",
         PERMANENT_SESSION_LIFETIME=60 * 60 * 8,  # 8 hours
     )
+
+    csrf = CSRFProtect(app)
+
+    @app.after_request
+    def set_security_headers(response):
+        # Prevents the page from being embedded in a frame on another
+        # site (clickjacking); redundant with the CSP frame-ancestors
+        # directive below on modern browsers, kept for older ones too.
+        response.headers["X-Frame-Options"] = "DENY"
+        # Stops browsers from MIME-sniffing a response away from its
+        # declared Content-Type.
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        # Only ever reached over HTTPS via Traefik in production (see
+        # SESSION_COOKIE_SECURE above) - tell browsers to enforce that
+        # for a year, including subdomains.
+        if os.environ.get("INSECURE_HTTP") != "true":
+            response.headers["Strict-Transport-Security"] = (
+                "max-age=31536000; includeSubDomains"
+            )
+        # No external resources are loaded (Google Fonts was removed
+        # specifically so nothing here needs a Subresource Integrity
+        # exception): everything comes from this same origin, plain
+        # inline <style>/<script> for the hand-written dashboard JS.
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data:; "
+            "object-src 'none'; "
+            "base-uri 'self'; "
+            "form-action 'self'; "
+            "frame-ancestors 'none'"
+        )
+        return response
 
     def get_db_conn():
         if "db" not in g:

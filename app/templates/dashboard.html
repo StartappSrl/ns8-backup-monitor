@@ -2,11 +2,9 @@
 <html lang="it">
 <head>
 <meta charset="UTF-8" />
+<meta name="csrf-token" content="{{ csrf_token() }}" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Report backup — Backup Monitor</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   :root{
     --bg:#F2F4F7; --panel:#FFFFFF; --panel-2:#F8F9FB; --border:#DDE2E9;
@@ -149,6 +147,7 @@
       <a href="{{ url_for('admin_users') }}" class="logout-btn" style="text-decoration:none;">Utenti</a>
     {% endif %}
     <form method="post" action="{{ url_for('logout') }}" style="margin:0;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button type="submit" class="logout-btn">Esci</button>
     </form>
   </div>
@@ -210,7 +209,11 @@
     const originalText = btn.textContent;
     btn.textContent = 'Scansione avviata…';
     try{
-      await fetch('/api/scan-now', {method:'POST', credentials:'same-origin'});
+      const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+      await fetch('/api/scan-now', {
+        method:'POST', credentials:'same-origin',
+        headers:{'X-CSRFToken': csrfToken},
+      });
     }catch(e){
       // ignore - the button re-enabling below still gives the person a
       // clear "something happened" signal either way

@@ -4,9 +4,6 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Utenti — Backup Monitor</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   :root{
     --bg:#F2F4F7; --panel:#FFFFFF; --panel-2:#F8F9FB; --border:#DDE2E9;
@@ -88,6 +85,7 @@
   <div class="panel">
     <h2>Aggiungi utente</h2>
     <form method="post" action="{{ url_for('admin_users_create') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div class="form-row">
         <div>
           <label for="username">Nome utente</label>
@@ -123,6 +121,7 @@
           <td class="mono">{{ u.created_at }}</td>
           <td style="text-align:right;">
             <form method="post" action="{{ url_for('admin_users_delete', username=u.username) }}" style="display:inline;" onsubmit="return confirm('Eliminare l\'utente {{ u.username }}?');">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button type="submit" class="delete-btn">Elimina</button>
             </form>
           </td>

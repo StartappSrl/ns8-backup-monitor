@@ -4,9 +4,6 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Configura MFA — Backup Monitor</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   :root{
     --bg:#12161D; --panel:#1A2029; --border:#2A313D; --text:#E7ECF2;
@@ -48,6 +45,7 @@
     <p>Poi inserisci qui sotto il codice a 6 cifre generato dall'app per confermare che tutto funziona:</p>
 
     <form method="post" action="{{ url_for('setup_verify') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <label for="totp_code">Codice di verifica</label>
       <input type="text" id="totp_code" name="totp_code" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" required autofocus>
 

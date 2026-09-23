@@ -4,9 +4,6 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Configurazione iniziale — Backup Monitor</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   :root{
     --bg:#12161D; --panel:#1A2029; --border:#2A313D; --text:#E7ECF2;
@@ -45,6 +42,7 @@
     </div>
     <p class="intro">Nessun utente configurato. Crea il primo account: sarà l'amministratore, potrà aggiungere altri utenti in seguito.</p>
     <form method="post" action="{{ url_for('setup') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <label for="username">Nome utente</label>
       <input type="text" id="username" name="username" required autofocus>
 

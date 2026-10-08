@@ -287,6 +287,151 @@ def extract_sql_backup_detail(raw_text: str) -> str:
     return " | ".join(lines)
 
 
+# Newer "SQL Server Management Tool" notifications replaced the plain
+# "Dettaglio:" paragraph with a structured section titled "Dettaglio per
+# database e destinazioni": one block per database ("ARCPROC · 43,5 MB"
+# followed by a status line like "✔ Completato"), then one sub-block per
+# destination ("Cartella locale" / "FTP BACKUPDB", each with its own
+# "✔ OK" line and free-text notes such as the .bak file name or
+# "Upload completato"). Status lines are recognised by a leading glyph.
+_SQL_OK_GLYPHS = "✔✓✅☑🟢🟩"
+_SQL_BAD_GLYPHS = "✖✘✗❌🔴🟥⛔"
+_SQL_WARN_GLYPHS = "⚠🟡🟧"
+_SQL_POSITIVE_TEXT_RE = re.compile(r"(ok|completat|riuscit|success|eseguit)", re.IGNORECASE)
+_SEVERITY_RANK = {"INFO": 0, "OK": 1, "WARNING": 2, "CRITICAL": 3}
+_FILELIKE_RE = re.compile(r"(\.(bak|trn|dif|zip|7z|rar)$)|\\|^[A-Za-z]:|^/", re.IGNORECASE)
+
+
+def _worst_severity(*severities: str) -> str:
+    return max(severities, key=lambda s: _SEVERITY_RANK.get(s, 0))
+
+
+def _sql_status_line_severity(line: str) -> str:
+    """Severity of one status line such as '✔ OK' or '✖ Upload fallito'."""
+    s = line.strip()
+    if not s:
+        return "INFO"
+    first, rest = s[0], s[1:].strip()
+    keyword_sev = classify_severity(rest)
+    if first in _SQL_BAD_GLYPHS:
+        return "CRITICAL"
+    if first in _SQL_WARN_GLYPHS:
+        return _worst_severity("WARNING", keyword_sev)
+    if first in _SQL_OK_GLYPHS:
+        return keyword_sev if keyword_sev in ("CRITICAL", "WARNING") else "OK"
+    # A symbol-led status line with a glyph not listed above: no positive
+    # glyph and no clearly positive wording means we can't tell it's fine,
+    # and in a monitoring tool "unsure" must not read as green.
+    if _SQL_POSITIVE_TEXT_RE.match(rest) and keyword_sev not in ("CRITICAL", "WARNING"):
+        return "OK"
+    return _worst_severity("WARNING", keyword_sev)
+
+
+def parse_sql_backup_structured(raw_text: str) -> Optional[tuple[str, str]]:
+    """Parse the structured per-database/per-destination section.
+
+    Returns (readable_detail, severity_from_detail), or None when the
+    body doesn't use this layout (the caller then falls back to the
+    older free-text 'Dettaglio:' extraction). The severity returned only
+    reflects what the detail itself reports - the caller combines it
+    with the header status, so an email whose header says 'COMPLETATO'
+    but whose FTP upload line says otherwise is not shown as green.
+    """
+    m = re.search(
+        r"Dettaglio per database e destinazioni\s*\n(.*?)(?:\n\s*Messaggio automatico|\Z)",
+        raw_text, re.DOTALL,
+    )
+    if not m:
+        return None
+
+    lines = [l.replace("\ufe0f", "").strip() for l in m.group(1).split("\n")]
+    lines = [l for l in lines if l]
+
+    dbs: list[dict] = []
+    cur_db: Optional[dict] = None
+    cur_dest: Optional[dict] = None
+
+    def is_status(l: str) -> bool:
+        # Any line led by a symbol/emoji (Unicode category "So") is a
+        # status line: covers the known ✔/✖/⚠ marks plus whatever the
+        # tool uses for states we haven't seen yet.
+        return unicodedata.category(l[0]) == "So"
+
+    for i, line in enumerate(lines):
+        if is_status(line):
+            if cur_dest is not None and cur_dest["status"] is None:
+                cur_dest["status"] = line
+            elif cur_db is not None and cur_db["status"] is None:
+                cur_db["status"] = line
+            elif cur_dest is not None:
+                cur_dest["notes"].append(line)
+            continue
+        if " · " in line:
+            name, size = line.split(" · ", 1)
+            cur_db = {"name": name.strip(), "size": size.strip(), "status": None, "dests": []}
+            dbs.append(cur_db)
+            cur_dest = None
+            continue
+        next_is_status = i + 1 < len(lines) and is_status(lines[i + 1])
+        if next_is_status:
+            if cur_db is None:
+                cur_db = {"name": "—", "size": "", "status": None, "dests": []}
+                dbs.append(cur_db)
+            cur_dest = {"name": line, "status": None, "notes": []}
+            cur_db["dests"].append(cur_dest)
+        elif cur_dest is not None:
+            cur_dest["notes"].append(line)
+
+    if not dbs:
+        return None
+
+    out: list[str] = []
+    severities: list[str] = []
+
+    rm = re.search(r"Riepilogo\s*\n\s*([^\n]+)", raw_text)
+    riepilogo = re.sub(r"\s+", " ", rm.group(1)).strip() if rm else ""
+    if riepilogo:
+        out.append(f"Riepilogo: {riepilogo}")
+        # Counts are parsed rather than keyword-matched so "0 falliti"
+        # doesn't read as a failure while "1 fallito" does.
+        for n, _w in re.findall(r"(\d+)\s*(fallit\w*|errore|errori|failed)", riepilogo, re.IGNORECASE):
+            if int(n) > 0:
+                severities.append("CRITICAL")
+        for n, _w in re.findall(r"(\d+)\s*(avvis\w*|warning\w*|parzial\w*)", riepilogo, re.IGNORECASE):
+            if int(n) > 0:
+                severities.append("WARNING")
+
+    for db in dbs:
+        head = db["name"] + (f" · {db['size']}" if db["size"] else "")
+        out.append(f"{head} — {db['status'] or 'stato non indicato'}")
+        if db["status"]:
+            severities.append(_sql_status_line_severity(db["status"]))
+        for d in db["dests"]:
+            line = f"  • {d['name']} — {d['status'] or 'stato non indicato'}"
+            notes = [n for n in d["notes"]]
+            if notes:
+                line += " — " + " | ".join(notes)
+            out.append(line)
+            if d["status"]:
+                severities.append(_sql_status_line_severity(d["status"]))
+            for n in notes:
+                # File names / paths are skipped: a database called
+                # "ERRORLOG" must not read as an error.
+                if _FILELIKE_RE.search(n):
+                    continue
+                if is_status(n):
+                    severities.append(_sql_status_line_severity(n))
+                else:
+                    ks = classify_severity(n)
+                    if ks in ("CRITICAL", "WARNING"):
+                        severities.append(ks)
+
+    text = "\n".join(out)
+    if len(text) > 6000:
+        text = text[:6000].rstrip() + "…"
+    return text, (_worst_severity(*severities) if severities else "INFO")
+
+
 # A third, unrelated report format: QNAP NAS "Hybrid Backup Sync" device
 # notifications, e.g. subject "[Info][Hybrid Backup Sync] Notifica dal
 # dispositivo: NASQNAP" with a body of colon-separated "Label: value"
@@ -497,7 +642,12 @@ def parse_eml_bytes(raw_bytes: bytes, source: str) -> list[dict[str, Any]]:
     # apply to it at all (different field labels, no "Job Status" etc.).
     bracket_parsed = parse_bracket_dash_subject(subject)
     if bracket_parsed:
-        detail = extract_sql_backup_detail(body_text) if body_text else ""
+        structured = parse_sql_backup_structured(body_text) if body_text else None
+        if structured:
+            detail, detail_severity = structured
+        else:
+            detail = extract_sql_backup_detail(body_text) if body_text else ""
+            detail_severity = "INFO"
         raw_timestamp = f"{bracket_parsed['date']} {bracket_parsed['time']}:00"
         status = bracket_parsed["status"]
         return [{
@@ -514,7 +664,7 @@ def parse_eml_bytes(raw_bytes: bytes, source: str) -> list[dict[str, Any]]:
             "ip_address": "",
             "start_end": "",
             "job_id": "",
-            "severity": classify_severity(status),
+            "severity": _worst_severity(classify_severity(status), detail_severity),
             "log_excerpt": detail,
         }]
 

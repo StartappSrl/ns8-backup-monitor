@@ -136,6 +136,61 @@
   .log-excerpt.WARNING pre{color:var(--warning); background:var(--warning-bg);}
   .log-excerpt.OK pre{color:var(--ok); background:var(--ok-bg);}
   .empty-state{padding:50px 20px; text-align:center; color:var(--text-faint);}
+
+  /* scan status bar */
+  .status-bar{
+    display:flex; align-items:center; gap:10px; padding:7px 24px; font-size:12.5px;
+    border-bottom:1px solid var(--border); background:var(--panel-2); color:var(--text-muted);
+  }
+  .status-bar .status-dot{width:8px; height:8px; border-radius:50%; background:var(--text-faint); flex:none;}
+  .status-bar .version{font-family:'IBM Plex Mono', monospace; font-size:11.5px; color:var(--text-faint);}
+  .status-bar[data-state="ok"] .status-dot{background:var(--ok);}
+  .status-bar[data-state="scanning"] .status-dot{background:var(--info);}
+  .status-bar[data-state="warning"]{background:var(--warning-bg); color:var(--warning);}
+  .status-bar[data-state="warning"] .status-dot{background:var(--warning);}
+  .status-bar[data-state="stale"], .status-bar[data-state="error"]{background:var(--critical-bg); color:var(--critical); font-weight:600;}
+  .status-bar[data-state="stale"] .status-dot, .status-bar[data-state="error"] .status-dot{background:var(--critical);}
+
+  /* overnight summary panel */
+  .night-panel{background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:12px 16px; display:flex; flex-direction:column; gap:8px;}
+  .night-panel[hidden]{display:none;}
+  .night-head{display:flex; flex-wrap:wrap; align-items:baseline; gap:6px 14px;}
+  .night-title{font-size:13.5px; font-weight:700;}
+  .night-range{font-size:11.5px; color:var(--text-faint); font-family:'IBM Plex Mono', monospace;}
+  .night-counts{font-size:12.5px; color:var(--text-muted);}
+  .night-counts b{color:var(--text);}
+  .night-counts .c-crit{color:var(--critical); font-weight:600;}
+  .night-counts .c-warn{color:var(--warning); font-weight:600;}
+  .night-line{display:flex; flex-wrap:wrap; align-items:center; gap:6px 8px; font-size:12.5px;}
+  .night-label{font-weight:700; font-size:12px; padding:2px 9px; border-radius:5px;}
+  .night-label.bad{background:var(--critical-bg); color:var(--critical);}
+  .night-label.good{background:var(--ok-bg); color:var(--ok);}
+  .miss-chip{border:1px solid var(--critical); color:var(--critical); background:var(--critical-bg); border-radius:14px; padding:2px 10px; font-size:12px; font-weight:600;}
+  .miss-chip small{font-weight:400; opacity:.85; margin-left:4px;}
+  .muted{color:var(--text-faint);}
+
+  /* clickable "non riconosciuti" stat */
+  .stat.unrec{cursor:pointer; border-left-color:var(--info);}
+  .stat.unrec .n{color:var(--info);}
+  .stat.unrec.active{outline:2px solid var(--info);}
+  .stat.unrec.zero{opacity:.6;}
+
+  /* digest settings dialog (admins) */
+  dialog{border:1px solid var(--border); border-radius:10px; background:var(--panel); color:var(--text); padding:0; width:min(520px, 92vw);}
+  dialog::backdrop{background:rgba(0,0,0,.45);}
+  .dlg-body{padding:20px 22px; display:flex; flex-direction:column; gap:12px;}
+  .dlg-body h2{margin:0; font-size:16px;}
+  .dlg-help{margin:0; font-size:12.5px; color:var(--text-muted);}
+  .dlg-row{display:flex; align-items:center; gap:8px; font-size:13px;}
+  .dlg-field{display:flex; flex-direction:column; gap:5px; font-size:12.5px; color:var(--text-muted);}
+  .dlg-field input, .dlg-field select{font-size:13px;}
+  .dlg-grid{display:grid; grid-template-columns:1fr 1fr; gap:12px;}
+  .dlg-info{margin:0; font-size:11.5px; color:var(--text-faint); font-family:'IBM Plex Mono', monospace; overflow-wrap:anywhere;}
+  .dlg-msg{margin:0; font-size:12.5px; min-height:1.2em; overflow-wrap:anywhere;}
+  .dlg-msg.ok{color:var(--ok);}
+  .dlg-msg.err{color:var(--critical);}
+  .dlg-actions{display:flex; justify-content:flex-end; gap:8px; flex-wrap:wrap;}
+  .scan-now-btn.secondary{background:var(--panel-2); color:var(--text); border:1px solid var(--border);}
 </style>
 </head>
 <body>
@@ -148,6 +203,7 @@
   <div class="user-box">
     <span>{{ username }}</span>
     {% if is_admin %}
+      <button type="button" id="digestBtn" class="logout-btn">Riepilogo email</button>
       <a href="{{ url_for('admin_users') }}" class="logout-btn" style="text-decoration:none;">Utenti</a>
     {% endif %}
     <form method="post" action="{{ url_for('logout') }}" style="margin:0;">
@@ -157,10 +213,19 @@
   </div>
 </header>
 
+<div class="status-bar" id="statusBar" data-state="waiting">
+  <span class="status-dot"></span>
+  <span id="statusText">Verifica dello stato della scansione…</span>
+  <span class="spacer"></span>
+  <span class="version" id="versionText"></span>
+</div>
+
 <main>
   <div class="sender-tabs" id="senderTabs"></div>
 
   <div class="summary" id="summary"></div>
+
+  <div class="night-panel" id="nightPanel" hidden></div>
 
   <div class="controls">
     <div class="chip active" data-sev="CRITICAL">Critico <span class="dot"></span></div>
@@ -192,6 +257,37 @@
   </div>
 </main>
 
+{% if is_admin %}
+<dialog id="digestModal">
+  <div class="dlg-body">
+    <h2>Riepilogo email giornaliero</h2>
+    <p class="dlg-help">Ogni giorno all'orario indicato arriva per email l'elenco dei clienti critici, in attenzione e mancanti nella notte appena conclusa.</p>
+    <label class="dlg-row"><input type="checkbox" id="digestEnabled"> Abilita l'invio automatico</label>
+    <label class="dlg-field">Destinatari <small>(separati da virgola, massimo 10)</small>
+      <input type="text" id="digestRecipients" placeholder="nome@azienda.it, altro@azienda.it">
+    </label>
+    <div class="dlg-grid">
+      <label class="dlg-field">Orario di invio
+        <input type="time" id="digestTime" value="07:00">
+      </label>
+      <label class="dlg-field">Connessione SMTP
+        <select id="digestMode">
+          <option value="starttls">Porta 587 · STARTTLS</option>
+          <option value="ssl">Porta 465 · SSL/TLS</option>
+        </select>
+      </label>
+    </div>
+    <p class="dlg-info" id="digestInfo"></p>
+    <p class="dlg-msg" id="digestMsg" role="status"></p>
+    <div class="dlg-actions">
+      <button type="button" class="scan-now-btn secondary" id="digestClose">Chiudi</button>
+      <button type="button" class="scan-now-btn secondary" id="digestTest">Salva e invia prova</button>
+      <button type="button" class="scan-now-btn" id="digestSave">Salva</button>
+    </div>
+  </div>
+</dialog>
+{% endif %}
+
 <script>
 (function(){
   let allReports = [];
@@ -200,6 +296,8 @@
   let currentSenders = [];
   let sortDir = 'desc'; // 'desc' = più recenti prima, 'asc' = più vecchi prima
   let expandedKeys = new Set();
+  let onlyUnrecognized = false;
+  const isUnrecognized = r => !((r.user||'') || (r.status||'') || (r.backup_set||''));
 
   document.querySelectorAll('.chip').forEach(chip=>{
     chip.addEventListener('click', ()=>{
@@ -211,7 +309,22 @@
   });
   document.getElementById('destFilter').addEventListener('change', render);
   document.getElementById('searchBox').addEventListener('input', render);
-  document.getElementById('windowDateFilter').addEventListener('change', render);
+  document.getElementById('windowDateFilter').addEventListener('change', ()=>{ render(); loadNight(); });
+
+  // The "non riconosciuti" stat card doubles as a filter toggle. Delegated,
+  // because renderSummary() rebuilds the card on every refresh.
+  document.getElementById('summary').addEventListener('click', (e)=>{
+    if(!e.target.closest('#unrecCard')) return;
+    onlyUnrecognized = !onlyUnrecognized;
+    if(onlyUnrecognized){
+      // unrecognized reports are always INFO - make sure they aren't hidden
+      activeSevs.add('INFO');
+      const chip = document.querySelector('.chip[data-sev="INFO"]');
+      if(chip) chip.classList.add('active');
+    }
+    renderSummary(lastSummary);
+    render();
+  });
 
   // Computes the "notte" (backup night) window for a given YYYY-MM-DD
   // calendar date: 13:00 on the day BEFORE it, through 06:00 on the
@@ -263,6 +376,111 @@
     return d.toLocaleString('it-IT', {day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
   }
 
+  let lastSummary = {};
+
+  // ---- scan status bar -----------------------------------------------------
+  function fmtAge(sec){
+    if(sec === null || sec === undefined) return '';
+    if(sec < 60) return 'pochi secondi fa';
+    const m = Math.floor(sec / 60);
+    if(m < 60) return `${m} min fa`;
+    const h = Math.floor(m / 60);
+    if(h < 24) return `${h} h ${m % 60} min fa`;
+    const d = Math.floor(h / 24);
+    return `${d} ${d === 1 ? 'giorno' : 'giorni'} fa`;
+  }
+  function fmtDur(sec){
+    if(sec < 60) return `${sec} s`;
+    const m = Math.floor(sec / 60);
+    return m < 60 ? `${m} min` : `${Math.floor(m/60)} h ${m % 60} min`;
+  }
+  async function loadStatus(){
+    const bar = document.getElementById('statusBar');
+    const txt = document.getElementById('statusText');
+    const ver = document.getElementById('versionText');
+    try{
+      const res = await fetch('/api/status', {credentials:'same-origin'});
+      if(res.status === 401 || res.redirected){ window.location.href = '/login'; return; }
+      const s = await res.json();
+      const last = s.age_seconds !== null ? `ultima completata ${fmtAge(s.age_seconds)}` : 'nessuna scansione completata finora';
+      let text;
+      switch(s.state){
+        case 'ok':       text = `Scansione regolare · ${last}`; break;
+        case 'scanning': text = `Scansione in corso da ${fmtDur(s.scan_seconds || 0)} · ${last}`; break;
+        case 'warning':  text = `Scansione completata con avvisi (${(s.warnings||[]).join('; ')}) · ${last}`; break;
+        case 'stale':    text = `Nessuna scansione completata di recente: ${last}`; break;
+        case 'error':    text = `Ultima scansione fallita: ${s.error || 'errore sconosciuto'} · ${last}`; break;
+        default:         text = 'In attesa della prima scansione';
+      }
+      bar.dataset.state = s.state;
+      txt.textContent = text;
+      ver.textContent = 'v' + s.version;
+    }catch(e){
+      bar.dataset.state = 'error';
+      txt.textContent = 'Impossibile contattare il server';
+    }
+  }
+
+  // ---- overnight summary panel ---------------------------------------------
+  let nightSeq = 0;
+  function fmtWin(s){
+    const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(s || '');
+    return m ? `${m[3]}/${m[2]} ${m[4]}:${m[5]}` : (s || '');
+  }
+  function fmtDay(s){
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s || '');
+    return m ? `${m[3]}/${m[2]}` : (s || '');
+  }
+  function renderNight(s){
+    const panel = document.getElementById('nightPanel');
+    const bs = s.by_severity || {};
+    const okN = (bs.OK || 0) + (bs.INFO || 0);
+    const n = s.total_clients || 0;
+    const counts = [`<b>${n}</b> client${n === 1 ? 'e' : 'i'}`];
+    counts.push(`${okN} OK`);
+    if(bs.WARNING) counts.push(`<span class="c-warn">${bs.WARNING} attenzione</span>`);
+    if(bs.CRITICAL) counts.push(`<span class="c-crit">${bs.CRITICAL} critic${bs.CRITICAL === 1 ? 'o' : 'i'}</span>`);
+    let missingHtml;
+    if(s.insufficient_history){
+      missingHtml = `<div class="night-line muted">Clienti mancanti: storico insufficiente (servono almeno 3 notti confrontabili con dati).</div>`;
+    }else if((s.missing || []).length){
+      const shown = s.missing.slice(0, 30).map(m =>
+        `<span class="miss-chip" title="Presente in ${m.seen_in} delle ${m.of} notti confrontate">${escapeHtml(m.user)}<small>${m.seen_in}/${m.of} · ultima ${fmtDay(m.last_night)}</small></span>`
+      ).join('');
+      const more = s.missing.length > 30 ? `<span class="muted">…e altri ${s.missing.length - 30}</span>` : '';
+      missingHtml = `<div class="night-line"><span class="night-label bad">Mancanti (${s.missing.length})</span>${shown}${more}</div>`;
+    }else{
+      missingHtml = `<div class="night-line"><span class="night-label good">Nessun cliente mancante</span><span class="muted">rispetto a ${s.considered_nights} notti confrontate</span></div>`;
+    }
+    panel.innerHTML = `
+      <div class="night-head">
+        <span class="night-title">Notte del ${fmtDay(s.date)}</span>
+        <span class="night-range">${fmtWin(s.start)} → ${fmtWin(s.end)}</span>
+        <span class="night-counts">${counts.join(' · ')}</span>
+      </div>
+      ${missingHtml}
+    `;
+    panel.hidden = false;
+  }
+  async function loadNight(){
+    const panel = document.getElementById('nightPanel');
+    const seq = ++nightSeq;           // ignore answers that arrive out of order
+    const params = new URLSearchParams();
+    const dv = document.getElementById('windowDateFilter').value;
+    if(dv) params.set('date', dv);
+    if(activeSender) params.set('sender', activeSender);
+    try{
+      const qs = params.toString();
+      const res = await fetch('/api/night-summary' + (qs ? '?' + qs : ''), {credentials:'same-origin'});
+      if(res.status === 401 || res.redirected){ window.location.href = '/login'; return; }
+      if(!res.ok) throw new Error('HTTP ' + res.status);
+      const s = await res.json();
+      if(seq === nightSeq) renderNight(s);
+    }catch(e){
+      if(seq === nightSeq) panel.hidden = true;
+    }
+  }
+
   async function load(){
     const url = activeSender ? `/api/reports?sender=${encodeURIComponent(activeSender)}` : '/api/reports';
     const res = await fetch(url, {credentials:'same-origin'});
@@ -270,9 +488,11 @@
     const data = await res.json();
     allReports = data.reports || [];
     renderSenderTabs(data.senders || []);
-    renderSummary(data.summary || {});
+    lastSummary = data.summary || {};
+    renderSummary(lastSummary);
     renderDestinations(data.destinations || []);
     render();
+    loadNight();
   }
 
   function renderSenderTabs(senders){
@@ -299,6 +519,7 @@
       <div class="stat critical"><div class="n">${summary.CRITICAL||0}</div><div class="l">Critici</div></div>
       <div class="stat warning"><div class="n">${summary.WARNING||0}</div><div class="l">Attenzione</div></div>
       <div class="stat ok"><div class="n">${summary.OK||0}</div><div class="l">OK</div></div>
+      <div class="stat unrec${onlyUnrecognized ? ' active' : ''}${summary.unrecognized ? '' : ' zero'}" id="unrecCard" title="Report che nessun parser ha riconosciuto (campi tutti vuoti): clicca per mostrare solo questi"><div class="n">${summary.unrecognized||0}</div><div class="l">Non riconosciuti</div></div>
     `;
   }
   function renderDestinations(destinations){
@@ -321,6 +542,7 @@
       if(!activeSevs.has(r.severity)) return false;
       if(destVal && r.destination !== destVal) return false;
       if(q && !((r.user||'').toLowerCase().includes(q) || (r.backup_set||'').toLowerCase().includes(q))) return false;
+      if(onlyUnrecognized && !isUnrecognized(r)) return false;
       if(windowRange){
         if(!r.timestamp) return false;
         const d = new Date(r.timestamp);
@@ -333,9 +555,9 @@
 
     const windowHint = document.getElementById('windowHint');
     if(windowRange){
-      const distinctAgents = new Set(filtered.map(r=>r.user || '—')).size;
+      // the distinct-client count now lives in the summary panel above
       const fmt = d => d.toLocaleString('it-IT', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
-      windowHint.innerHTML = `${fmt(windowRange.start)} → ${fmt(windowRange.end)} · <strong>${distinctAgents}</strong> client${distinctAgents===1?'':'i'} distinti`;
+      windowHint.textContent = `${fmt(windowRange.start)} → ${fmt(windowRange.end)}`;
     } else {
       windowHint.textContent = '';
     }
@@ -463,8 +685,78 @@
     render();
   });
 
+  // ---- e-mail digest settings (admins only: the dialog only exists for them)
+  const digestModal = document.getElementById('digestModal');
+  if(digestModal){
+    const $ = id => document.getElementById(id);
+    const csrf = () => document.querySelector('meta[name="csrf-token"]').content;
+    const say = (text, kind) => { const m = $('digestMsg'); m.textContent = text || ''; m.className = 'dlg-msg' + (kind ? ' ' + kind : ''); };
+    function fillDigest(s){
+      $('digestEnabled').checked = !!s.enabled;
+      $('digestRecipients').value = s.recipients || '';
+      $('digestTime').value = s.time || '07:00';
+      $('digestMode').value = s.mode || 'starttls';
+      const bits = [`Invio da ${s.from || '?'} tramite ${s.smtp_host || '?'}`];
+      if(s.last_sent_at) bits.push(`ultimo invio: ${s.last_sent_at.replace('T', ' ').slice(0, 16)}`);
+      if(s.last_error) bits.push(`ultimo errore: ${s.last_error}`);
+      $('digestInfo').textContent = bits.join(' · ');
+    }
+    async function digestRequest(url, method, body){
+      const res = await fetch(url, {
+        method, credentials:'same-origin',
+        headers:{'Content-Type':'application/json', 'X-CSRFToken': csrf()},
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      if(res.status === 401){ window.location.href = '/login'; throw new Error('sessione scaduta'); }
+      const data = await res.json().catch(()=>({}));
+      if(!res.ok) throw new Error(data.error || ('Errore ' + res.status));
+      return data;
+    }
+    const readForm = () => ({
+      enabled: $('digestEnabled').checked,
+      recipients: $('digestRecipients').value,
+      time: $('digestTime').value,
+      mode: $('digestMode').value,
+    });
+    async function saveDigest(){
+      const s = await digestRequest('/api/digest-settings', 'POST', readForm());
+      fillDigest(s);
+      return s;
+    }
+    $('digestBtn').addEventListener('click', async ()=>{
+      say('');
+      try{ fillDigest(await digestRequest('/api/digest-settings', 'GET')); }
+      catch(e){ say(e.message, 'err'); }
+      if(typeof digestModal.showModal === 'function') digestModal.showModal();
+      else digestModal.setAttribute('open', '');
+    });
+    $('digestClose').addEventListener('click', ()=>{
+      if(typeof digestModal.close === 'function') digestModal.close();
+      else digestModal.removeAttribute('open');
+    });
+    $('digestSave').addEventListener('click', async ()=>{
+      say('Salvataggio…');
+      try{ await saveDigest(); say('Impostazioni salvate.', 'ok'); }
+      catch(e){ say(e.message, 'err'); }
+    });
+    $('digestTest').addEventListener('click', async ()=>{
+      const btn = $('digestTest');
+      btn.disabled = true;
+      say('Salvataggio e invio in corso…');
+      try{
+        await saveDigest();
+        const r = await digestRequest('/api/digest-test', 'POST');
+        if(r.ok) say('Email di prova inviata: ' + r.subject, 'ok');
+        else say('Invio non riuscito: ' + r.error, 'err');
+      }catch(e){ say(e.message, 'err'); }
+      btn.disabled = false;
+    });
+  }
+
   load();
+  loadStatus();
   setInterval(load, 60000);
+  setInterval(loadStatus, 30000);
 })();
 </script>
 </body>

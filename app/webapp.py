@@ -20,6 +20,7 @@ from __future__ import annotations
 import os
 import secrets
 import time
+from datetime import date
 from functools import wraps
 
 from flask import Flask, g, redirect, render_template, request, session, url_for, jsonify
@@ -27,7 +28,10 @@ from flask_wtf import CSRFProtect
 
 import authlib
 import poller
-from db import get_db
+from db import (
+    UNRECOGNIZED_SQL, default_night_date, digest_settings, get_db, local_now,
+    night_summary, save_digest_settings, scan_status, validate_digest_settings,
+)
 
 SECRET_KEY_PATH = os.environ.get("FLASK_SECRET_KEY_PATH", "/state/flask_secret_key")
 MAX_FAILED_ATTEMPTS = 5
@@ -121,6 +125,19 @@ def create_app() -> Flask:
                 return redirect(url_for("login", next=request.path))
             if not session.get("is_admin"):
                 return ("Forbidden: administrator access required", 403)
+            return view(*args, **kwargs)
+
+        return wrapped
+
+    def api_admin_required(view):
+        """Like admin_required, but answers JSON (these endpoints are called
+        by fetch(), which can't do anything useful with a redirect)."""
+        @wraps(view)
+        def wrapped(*args, **kwargs):
+            if not session.get("username"):
+                return jsonify({"error": "Sessione scaduta"}), 401
+            if not session.get("is_admin"):
+                return jsonify({"error": "Riservato agli amministratori"}), 403
             return view(*args, **kwargs)
 
         return wrapped
@@ -277,6 +294,13 @@ def create_app() -> Flask:
             scope_params,
         ):
             summary[row["severity"]] = row["n"]
+        # Reports no parser understood (every field blank): surfaced as its
+        # own badge so a new, unsupported e-mail format is noticed straight
+        # away instead of whenever someone happens to see blank rows.
+        summary["unrecognized"] = db.execute(
+            f"SELECT COUNT(*) AS n FROM reports WHERE {UNRECOGNIZED_SQL}{scope_query_suffix}",
+            scope_params,
+        ).fetchone()["n"]
 
         destinations = [
             r["destination"] for r in
@@ -303,6 +327,52 @@ def create_app() -> Flask:
     def api_scan_now():
         poller.trigger_scan_now()
         return jsonify({"status": "ok"})
+
+    @app.route("/api/status")
+    @login_required
+    def api_status():
+        return jsonify(scan_status(get_db_conn()))
+
+    @app.route("/api/night-summary")
+    @login_required
+    def api_night_summary():
+        raw = (request.args.get("date") or "").strip()
+        try:
+            d = date.fromisoformat(raw) if raw else default_night_date(local_now())
+        except ValueError:
+            return jsonify({"error": "Data non valida"}), 400
+        if not (date(2000, 1, 1) <= d <= date(2100, 12, 31)):
+            return jsonify({"error": "Data fuori intervallo"}), 400
+        return jsonify(night_summary(get_db_conn(), d, request.args.get("sender") or ""))
+
+    def _digest_payload(conn):
+        s = digest_settings(conn)
+        s["smtp_host"] = os.environ.get("SMTP_HOST") or os.environ.get("IMAP_HOST", "")
+        s["from"] = os.environ.get("SMTP_FROM") or os.environ.get("IMAP_USERNAME", "")
+        return s
+
+    @app.route("/api/digest-settings", methods=["GET", "POST"])
+    @api_admin_required
+    def api_digest_settings():
+        conn = get_db_conn()
+        if request.method == "POST":
+            clean, error = validate_digest_settings(request.get_json(silent=True) or {})
+            if error:
+                return jsonify({"error": error}), 400
+            save_digest_settings(conn, clean)
+        return jsonify(_digest_payload(conn))
+
+    @app.route("/api/digest-test", methods=["POST"])
+    @api_admin_required
+    def api_digest_test():
+        """Sends the real digest (subject prefixed [PROVA]) to the SAVED
+        recipients, reporting the exact SMTP error if it fails so the
+        settings can be corrected without reading server logs."""
+        try:
+            subject = poller.send_digest_now(get_db_conn(), test=True)
+        except Exception as e:  # noqa: BLE001 - shown to the admin as-is
+            return jsonify({"ok": False, "error": f"{type(e).__name__}: {str(e)[:300]}"})
+        return jsonify({"ok": True, "subject": subject})
 
     @app.route("/healthz")
     def healthz():

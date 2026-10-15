@@ -13,7 +13,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY parsing.py poller.py db.py authlib.py webapp.py main.py ./
+COPY parsing.py poller.py db.py authlib.py nightreport.py webapp.py main.py ./
 COPY templates ./templates
 
 # Deliberately NOT dropping to a non-root user here: /state is a bind

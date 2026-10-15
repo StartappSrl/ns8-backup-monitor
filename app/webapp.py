@@ -19,18 +19,19 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import secrets
 import time
 from datetime import date
 from functools import wraps
 
-from flask import Flask, g, redirect, render_template, request, session, url_for, jsonify
+from flask import Flask, Response, g, redirect, render_template, request, session, url_for, jsonify
 from flask_wtf import CSRFProtect
 
 import authlib
 import poller
 from db import (
-    UNRECOGNIZED_SQL, default_night_date, digest_settings, get_db, local_now,
+    APP_VERSION, UNRECOGNIZED_SQL, default_night_date, digest_settings, get_db, local_now,
     night_summary, save_digest_settings, scan_status, validate_digest_settings,
 )
 
@@ -427,17 +428,53 @@ def create_app() -> Flask:
     def api_status():
         return jsonify(scan_status(get_db_conn()))
 
-    @app.route("/api/night-summary")
-    @login_required
-    def api_night_summary():
+    def requested_night():
+        """The night asked for via ?date=YYYY-MM-DD (default: the latest finished
+        one). Returns (date, None), or (None, error_response)."""
         raw = (request.args.get("date") or "").strip()
         try:
             d = date.fromisoformat(raw) if raw else default_night_date(local_now())
         except ValueError:
-            return jsonify({"error": "Data non valida"}), 400
+            return None, (jsonify({"error": "Data non valida"}), 400)
         if not (date(2000, 1, 1) <= d <= date(2100, 12, 31)):
-            return jsonify({"error": "Data fuori intervallo"}), 400
+            return None, (jsonify({"error": "Data fuori intervallo"}), 400)
+        return d, None
+
+    @app.route("/api/night-summary")
+    @login_required
+    def api_night_summary():
+        d, err = requested_night()
+        if err:
+            return err
         return jsonify(night_summary(get_db_conn(), d, request.args.get("sender") or ""))
+
+    @app.route("/api/night-report.pdf")
+    @login_required
+    def api_night_report_pdf():
+        """The same night as the dashboard panel, as a printable PDF."""
+        d, err = requested_night()
+        if err:
+            return err
+        sender = request.args.get("sender") or ""
+        try:
+            # imported here so a missing module/library degrades to a clear
+            # message for this one endpoint instead of keeping the whole app down
+            from nightreport import build_night_pdf
+        except ImportError as e:
+            log.error("PDF generator unavailable: %s", e)
+            return jsonify({"error": "Generatore PDF non disponibile in questa immagine "
+                                     "(nightreport.py o reportlab mancanti)."}), 503
+        try:
+            pdf = build_night_pdf(night_summary(get_db_conn(), d, sender), sender, local_now(), APP_VERSION)
+        except Exception:
+            log.exception("PDF generation failed for %s", d)
+            return jsonify({"error": "Errore nella generazione del PDF."}), 500
+        slug = re.sub(r"[^A-Za-z0-9._-]+", "_", sender).strip("_")[:40]
+        filename = f"backup-notte-{d.isoformat()}" + (f"-{slug}" if slug else "") + ".pdf"
+        resp = Response(pdf, mimetype="application/pdf")
+        resp.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
 
     def _digest_payload(conn):
         s = digest_settings(conn)

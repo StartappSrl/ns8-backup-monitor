@@ -156,6 +156,8 @@
   .night-panel[hidden]{display:none;}
   .night-head{display:flex; flex-wrap:wrap; align-items:baseline; gap:6px 14px;}
   .night-title{font-size:13.5px; font-weight:700;}
+  .pdf-link{margin-left:auto; font-size:12px; font-weight:600; color:var(--accent); text-decoration:none; border:1px solid var(--border); border-radius:6px; padding:4px 11px; background:var(--panel-2);}
+  .pdf-link:hover{border-color:var(--accent);}
   .night-range{font-size:11.5px; color:var(--text-faint); font-family:'IBM Plex Mono', monospace;}
   .night-counts{font-size:12.5px; color:var(--text-muted);}
   .night-counts b{color:var(--text);}
@@ -452,11 +454,14 @@
     }else{
       missingHtml = `<div class="night-line"><span class="night-label good">Nessun cliente mancante</span><span class="muted">rispetto a ${s.considered_nights} notti confrontate</span></div>`;
     }
+    const pdfParams = new URLSearchParams({date: s.date});
+    if(activeSender) pdfParams.set('sender', activeSender);
     panel.innerHTML = `
       <div class="night-head">
         <span class="night-title">Notte del ${fmtDay(s.date)}</span>
         <span class="night-range">${fmtWin(s.start)} → ${fmtWin(s.end)}</span>
         <span class="night-counts">${counts.join(' · ')}</span>
+        <a class="pdf-link" href="/api/night-report.pdf?${pdfParams.toString()}" title="Scarica questo riepilogo in PDF">Scarica PDF</a>
       </div>
       ${missingHtml}
     `;

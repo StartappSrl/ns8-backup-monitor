@@ -10,6 +10,7 @@ import base64
 import hashlib
 import hmac
 import os
+import secrets
 import struct
 import time
 
@@ -81,6 +82,18 @@ def verify_totp(secret_b32: str, code: str, valid_window: int = 1) -> bool:
         if hmac.compare_digest(_hotp(secret_b32, counter + offset), code.strip()):
             return True
     return False
+
+
+def new_device_token() -> str:
+    """Random token for the "trusted device" cookie (256 bits)."""
+    return secrets.token_urlsafe(32)
+
+
+def hash_device_token(token: str) -> str:
+    """Only this hash is stored server-side, so a copy of the database can't
+    be used to forge a trusted-device cookie. Plain SHA-256 is right for a
+    high-entropy random token (a slow password KDF would add nothing)."""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
 def provisioning_uri(secret_b32: str, username: str, issuer: str = "BackupMonitor") -> str:

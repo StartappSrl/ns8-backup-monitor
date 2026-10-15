@@ -28,7 +28,7 @@ DB_PATH = os.environ.get("DB_PATH", "/state/reports.db")
 
 # Bump on every release: shown in the dashboard so "which code is the
 # container actually running?" never needs a trip to the server again.
-APP_VERSION = "2026.10.13-1"
+APP_VERSION = "2026.10.13-2"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS reports (
@@ -67,6 +67,13 @@ CREATE TABLE IF NOT EXISTS login_attempts (
 CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
     value TEXT
+);
+CREATE TABLE IF NOT EXISTS trusted_devices (
+    token_hash   TEXT PRIMARY KEY,
+    username     TEXT NOT NULL,
+    created_at   REAL NOT NULL,
+    expires_at   REAL NOT NULL,
+    last_used_at REAL
 );
 """
 

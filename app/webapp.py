@@ -17,6 +17,7 @@ first admin account. From then on, admins manage further accounts from
 
 from __future__ import annotations
 
+import logging
 import os
 import secrets
 import time
@@ -33,9 +34,18 @@ from db import (
     night_summary, save_digest_settings, scan_status, validate_digest_settings,
 )
 
+log = logging.getLogger("backup-monitor.web")
+
 SECRET_KEY_PATH = os.environ.get("FLASK_SECRET_KEY_PATH", "/state/flask_secret_key")
 MAX_FAILED_ATTEMPTS = 5
 LOCKOUT_SECONDS = 15 * 60
+
+# "Trust this device": after a full login (password + authenticator code)
+# the person may tick a box so that, for this many days, this browser only
+# needs the password. 0 disables the feature entirely.
+TRUSTED_DEVICE_DAYS = int(os.environ.get("TRUSTED_DEVICE_DAYS", "30"))
+TRUSTED_COOKIE = "trusted_device"
+MAX_TRUSTED_DEVICES_PER_USER = 10
 
 
 def _load_or_create_secret_key() -> bytes:
@@ -159,6 +169,65 @@ def create_app() -> Flask:
 
     # -- login attempt throttling -------------------------------------
 
+    # -- trusted devices --------------------------------------------------
+    # The cookie holds a random token; only its hash lives in the database,
+    # tied to ONE username and to an absolute expiry (not extended by use),
+    # so it can be revoked server-side and can't be replayed for another
+    # account. It skips the authenticator code only - the password is
+    # always required, and failed attempts still count towards lockout.
+
+    def trusted_device_valid(db, username: str, token: str) -> bool:
+        if TRUSTED_DEVICE_DAYS <= 0 or not token:
+            return False
+        h = authlib.hash_device_token(token)
+        row = db.execute(
+            "SELECT 1 FROM trusted_devices WHERE token_hash = ? AND username = ? AND expires_at > ?",
+            (h, username, time.time()),
+        ).fetchone()
+        if row:
+            db.execute("UPDATE trusted_devices SET last_used_at = ? WHERE token_hash = ?", (time.time(), h))
+            db.commit()
+        return bool(row)
+
+    def trusted_token_still_known(db, token: str) -> bool:
+        """True if the token is a live trusted-device token for ANY user (used
+        only to decide whether a leftover cookie is stale and can be dropped)."""
+        if not token:
+            return False
+        return db.execute(
+            "SELECT 1 FROM trusted_devices WHERE token_hash = ? AND expires_at > ?",
+            (authlib.hash_device_token(token), time.time()),
+        ).fetchone() is not None
+
+    def issue_trusted_device(db, username: str) -> str:
+        now = time.time()
+        db.execute("DELETE FROM trusted_devices WHERE expires_at <= ?", (now,))
+        token = authlib.new_device_token()
+        db.execute(
+            "INSERT INTO trusted_devices (token_hash, username, created_at, expires_at) VALUES (?,?,?,?)",
+            (authlib.hash_device_token(token), username, now, now + TRUSTED_DEVICE_DAYS * 86400),
+        )
+        # keep only the newest few per user, so the table can't grow unbounded
+        db.execute(
+            "DELETE FROM trusted_devices WHERE username = ? AND token_hash NOT IN ("
+            "SELECT token_hash FROM trusted_devices WHERE username = ? ORDER BY created_at DESC LIMIT ?)",
+            (username, username, MAX_TRUSTED_DEVICES_PER_USER),
+        )
+        db.commit()
+        return token
+
+    def revoke_trusted_devices(db, username: str) -> int:
+        cur = db.execute("DELETE FROM trusted_devices WHERE username = ?", (username,))
+        db.commit()
+        return cur.rowcount
+
+    def safe_next_url(value: str | None) -> str:
+        """Only same-site paths: an attacker-supplied ?next=https://evil.example
+        must not turn a successful login into an open redirect."""
+        if value and value.startswith("/") and not value.startswith("//") and "\\" not in value:
+            return value
+        return url_for("dashboard")
+
     def is_locked_out(db, username: str) -> bool:
         row = db.execute(
             "SELECT locked_until FROM login_attempts WHERE username = ?", (username,)
@@ -198,7 +267,9 @@ def create_app() -> Flask:
         if request.method == "POST":
             username = (request.form.get("username") or "").strip()
             password = request.form.get("password") or ""
-            totp_code = request.form.get("totp_code") or ""
+            totp_code = (request.form.get("totp_code") or "").strip()
+            wants_trust = bool(request.form.get("trust_device")) and TRUSTED_DEVICE_DAYS > 0
+            device_token = request.cookies.get(TRUSTED_COOKIE, "")
             db = get_db_conn()
 
             if is_locked_out(db, username):
@@ -207,24 +278,47 @@ def create_app() -> Flask:
                 user = db.execute(
                     "SELECT * FROM users WHERE username = ? AND disabled = 0", (username,)
                 ).fetchone()
-                valid = (
-                    user is not None
-                    and authlib.verify_password(password, user["password_hash"])
-                    and authlib.verify_totp(user["totp_secret"], totp_code)
-                )
-                if valid:
+                password_ok = user is not None and authlib.verify_password(password, user["password_hash"])
+                via_trusted_device = False
+                device_valid = password_ok and trusted_device_valid(db, username, device_token)
+                if not password_ok:
+                    second_factor_ok = False
+                elif totp_code:
+                    # a code that was typed must be right, even on a trusted device
+                    second_factor_ok = authlib.verify_totp(user["totp_secret"], totp_code)
+                else:
+                    via_trusted_device = device_valid
+                    second_factor_ok = device_valid
+                if password_ok and second_factor_ok:
                     clear_failed_attempts(db, username)
                     session.clear()
                     session.permanent = True
                     session["username"] = username
                     session["is_admin"] = bool(user["is_admin"])
-                    next_url = request.args.get("next") or url_for("dashboard")
-                    return redirect(next_url)
+                    resp = redirect(safe_next_url(request.args.get("next")))
+                    if via_trusted_device:
+                        log.info("Login of %s via trusted device", username)
+                    elif wants_trust:
+                        resp.set_cookie(
+                            TRUSTED_COOKIE, issue_trusted_device(db, username),
+                            max_age=TRUSTED_DEVICE_DAYS * 86400, httponly=True,
+                            secure=os.environ.get("INSECURE_HTTP") != "true",
+                            samesite="Lax", path="/",
+                        )
+                        log.info("Device marked as trusted for %s for %d days", username, TRUSTED_DEVICE_DAYS)
+                    elif device_token and not device_valid and not trusted_token_still_known(db, device_token):
+                        # revoked/expired on the server: drop the dead cookie so the
+                        # login page stops offering the optional-code shortcut
+                        resp.delete_cookie(TRUSTED_COOKIE, path="/")
+                    return resp
                 else:
                     register_failed_attempt(db, username)
                     error = "invalid_credentials"
 
-        return render_template("login.html", error=error)
+        return render_template(
+            "login.html", error=error, trust_days=TRUSTED_DEVICE_DAYS,
+            device_hint=bool(request.cookies.get(TRUSTED_COOKIE)),
+        )
 
     @app.route("/logout", methods=["POST"])
     def logout():
@@ -447,12 +541,21 @@ def create_app() -> Flask:
             "SELECT username, is_admin, disabled, created_at FROM users ORDER BY username"
         ).fetchall()
         new_user_totp = session.pop("new_user_totp", None)
+        trusted_counts = {
+            r["username"]: r["n"] for r in db.execute(
+                "SELECT username, COUNT(*) AS n FROM trusted_devices WHERE expires_at > ? GROUP BY username",
+                (time.time(),),
+            )
+        }
         return render_template(
             "admin_users.html",
             users=users,
             current_username=session["username"],
             new_user_totp=new_user_totp,
             error=session.pop("admin_users_error", None),
+            notice=session.pop("admin_users_notice", None),
+            trusted_counts=trusted_counts,
+            trust_days=TRUSTED_DEVICE_DAYS,
         )
 
     @app.route("/admin/users/create", methods=["POST"])
@@ -499,7 +602,15 @@ def create_app() -> Flask:
 
         db.execute("DELETE FROM users WHERE username = ?", (username,))
         db.execute("DELETE FROM login_attempts WHERE username = ?", (username,))
+        db.execute("DELETE FROM trusted_devices WHERE username = ?", (username,))
         db.commit()
+        return redirect(url_for("admin_users"))
+
+    @app.route("/admin/users/<username>/revoke-devices", methods=["POST"])
+    @admin_required
+    def admin_users_revoke_devices(username):
+        n = revoke_trusted_devices(get_db_conn(), username)
+        session["admin_users_notice"] = f"devices_revoked:{n}"
         return redirect(url_for("admin_users"))
 
     return app

@@ -42,6 +42,9 @@
   .badge.admin{background:var(--ok-bg); color:var(--ok);}
   .badge.you{background:var(--panel-2); color:var(--text-muted); margin-left:6px;}
   .delete-btn{background:transparent; color:var(--error); border:1px solid var(--error); padding:5px 10px; font-size:12px; margin:0;}
+  .notice{margin-top:14px; padding:10px 12px; border-radius:7px; background:var(--ok-bg); color:var(--ok); font-size:12.5px;}
+  .sub{display:block; font-size:11px; color:var(--text-muted); margin-top:3px; font-weight:400;}
+  .revoke-btn{background:transparent; color:var(--text-muted); border:1px solid var(--border); padding:5px 10px; font-size:12px; margin:0 6px 0 0;}
   .error{margin-top:14px; padding:10px 12px; border-radius:7px; background:var(--error-bg); color:var(--error); font-size:12.5px;}
   .totp-box{margin-top:14px; padding:14px; border-radius:7px; background:var(--ok-bg); color:var(--text); font-size:12.5px;}
   .totp-box .k{color:var(--text-muted); font-size:11px; text-transform:uppercase; letter-spacing:0.03em; margin-top:8px;}
@@ -70,6 +73,10 @@
     <div class="k">URI di provisioning</div>
     <div class="v mono">{{ new_user_totp.totp_uri }}</div>
   </div>
+  {% endif %}
+
+  {% if notice and notice.startswith("devices_revoked:") %}
+    <div class="panel notice">Dispositivi attendibili revocati: {{ notice.split(":")[1] }}. Al prossimo accesso servirà di nuovo il codice di verifica.</div>
   {% endif %}
 
   {% if error == "invalid_input" %}
@@ -117,9 +124,18 @@
             {{ u.username }}
             {% if u.is_admin %}<span class="badge admin">Admin</span>{% endif %}
             {% if u.username == current_username %}<span class="badge you">Tu</span>{% endif %}
+            {% if trust_days and trust_days > 0 %}
+              <span class="sub">{{ trusted_counts.get(u.username, 0) }} dispositiv{{ 'o' if trusted_counts.get(u.username, 0) == 1 else 'i' }} attendibil{{ 'e' if trusted_counts.get(u.username, 0) == 1 else 'i' }}</span>
+            {% endif %}
           </td>
           <td class="mono">{{ u.created_at }}</td>
           <td style="text-align:right;">
+            {% if trusted_counts.get(u.username, 0) > 0 %}
+            <form method="post" action="{{ url_for('admin_users_revoke_devices', username=u.username) }}" style="display:inline;" onsubmit="return confirm('Revocare i dispositivi attendibili di {{ u.username }}? Dovrà inserire di nuovo il codice di verifica.');">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="revoke-btn">Revoca dispositivi</button>
+            </form>
+            {% endif %}
             <form method="post" action="{{ url_for('admin_users_delete', username=u.username) }}" style="display:inline;" onsubmit="return confirm('Eliminare l\'utente {{ u.username }}?');">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button type="submit" class="delete-btn">Elimina</button>

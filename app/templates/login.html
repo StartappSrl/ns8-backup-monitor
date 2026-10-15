@@ -46,6 +46,9 @@
     background:var(--error-bg); color:var(--error); font-size:12.5px;
   }
   .hint{font-size:11.5px; color:var(--text-muted); margin-top:6px;}
+  .trust-row{display:flex; align-items:center; gap:8px; margin:16px 0 0; font-size:12.5px; color:var(--text);}
+  .trust-row input{width:auto; margin:0;}
+  .trust-row label{margin:0; color:var(--text);}
 </style>
 </head>
 <body>
@@ -63,8 +66,18 @@
       <input type="password" id="password" name="password" autocomplete="current-password" required>
 
       <label for="totp_code">Codice di verifica (app authenticator)</label>
-      <input type="text" id="totp_code" name="totp_code" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" required>
-      <div class="hint">Il codice a 6 cifre generato dalla tua app di autenticazione</div>
+      <input type="text" id="totp_code" name="totp_code" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code"{% if not device_hint %} required{% endif %}>
+      <div class="hint">
+        {% if device_hint %}Puoi lasciarlo vuoto se hai reso attendibile questo dispositivo, altrimenti inserisci il codice a 6 cifre della tua app di autenticazione{% else %}Il codice a 6 cifre generato dalla tua app di autenticazione{% endif %}
+      </div>
+
+      {% if trust_days and trust_days > 0 %}
+      <div class="trust-row">
+        <input type="checkbox" id="trust_device" name="trust_device" value="1">
+        <label for="trust_device">Ricorda questo dispositivo per {{ trust_days }} giorni</label>
+      </div>
+      <div class="hint">Per {{ trust_days }} giorni da questo browser basterà la password, senza il codice. Non usarlo su computer condivisi o pubblici.</div>
+      {% endif %}
 
       {% if error == "invalid_credentials" %}
         <div class="error">Utente, password o codice non validi.</div>

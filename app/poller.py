@@ -47,7 +47,7 @@ from email.utils import formatdate, make_msgid, parseaddr
 
 import parsing
 from db import (
-    DB_PATH, UNRECOGNIZED_SQL, default_night_date, digest_settings, get_db,
+    APP_VERSION, DB_PATH, UNRECOGNIZED_SQL, default_night_date, digest_settings, get_db,
     local_now, meta_get, meta_set, night_summary, scan_status, utc_iso_now,
 )
 
@@ -329,9 +329,14 @@ def _fmt_date(s: str) -> str:
         return s
 
 
-def build_digest(conn_db: sqlite3.Connection, d) -> tuple[str, str, str]:
-    """(subject, plain_text, html) for the night of date `d`."""
-    s = night_summary(conn_db, d)
+def build_digest(conn_db: sqlite3.Connection, d, summary: dict | None = None,
+                 pdf_status: str | None = None) -> tuple[str, str, str]:
+    """(subject, plain_text, html) for the night of date `d`.
+
+    `summary` lets the caller reuse the night_summary() it already computed
+    for the PDF, so the e-mail body and its attachment can never disagree.
+    `pdf_status` is "attached", "failed" or None (not requested)."""
+    s = summary if summary is not None else night_summary(conn_db, d)
     bs = s["by_severity"]
     crit = [p for p in s["problems"] if p["severity"] == "CRITICAL"]
     warn = [p for p in s["problems"] if p["severity"] == "WARNING"]
@@ -402,6 +407,12 @@ def build_digest(conn_db: sqlite3.Connection, d) -> tuple[str, str, str]:
             text += ["", "Nessun cliente mancante."]
     if unrecognized:
         text += ["", f"Report non riconosciuti nel database: {unrecognized}"]
+    pdf_line = {
+        "attached": "Il report PDF completo è in allegato.",
+        "failed": "Il report PDF non è stato allegato a causa di un errore di generazione.",
+    }.get(pdf_status or "")
+    if pdf_line:
+        text += ["", pdf_line]
     if link:
         text += ["", f"Dashboard: {link}"]
 
@@ -435,6 +446,9 @@ def build_digest(conn_db: sqlite3.Connection, d) -> tuple[str, str, str]:
         body.append('<p style="color:#237a50">Nessun cliente mancante.</p>')
     if unrecognized:
         body.append(f"<p>Report non riconosciuti nel database: <b>{unrecognized}</b></p>")
+    if pdf_line:
+        color = "#b45309" if pdf_status == "failed" else "#5b6472"
+        body.append(f'<p style="color:{color}">{esc(pdf_line)}</p>')
     if link:
         body.append(f'<p><a href="{esc(link)}">Apri la dashboard</a></p>')
     html = ('<div style="font-family:Arial,sans-serif;font-size:13px;color:#1b222c">'
@@ -444,7 +458,8 @@ def build_digest(conn_db: sqlite3.Connection, d) -> tuple[str, str, str]:
 
 def send_email(subject: str, text_body: str, html_body: str, recipients: list[str],
                mode: str = "starttls", context=None, host: str | None = None,
-               port: int | None = None) -> None:
+               port: int | None = None,
+               attachments: list[tuple[str, bytes, str]] | None = None) -> None:
     """Send through the mailbox's own SMTP service. Raises on any failure.
 
     Every socket operation is bounded by SMTP_TIMEOUT: an unbounded wait is
@@ -462,6 +477,9 @@ def send_email(subject: str, text_body: str, html_body: str, recipients: list[st
     msg["Message-ID"] = make_msgid()
     msg.set_content(text_body)
     msg.add_alternative(html_body, subtype="html")
+    for filename, data, mimetype in attachments or []:
+        maintype, _, subtype = mimetype.partition("/")
+        msg.add_attachment(data, maintype=maintype, subtype=subtype or "octet-stream", filename=filename)
     ctx = context or ssl.create_default_context()
     if mode == "ssl":
         with smtplib.SMTP_SSL(host, port or 465, timeout=timeout, context=ctx) as s:
@@ -483,10 +501,26 @@ def send_digest_now(conn_db: sqlite3.Connection, test: bool = False, **smtp_kwar
     recipients = [r for r in re.split(r"[,\s;]+", settings["recipients"]) if r]
     if not recipients:
         raise RuntimeError("Nessun destinatario configurato.")
-    subject, text, html = build_digest(conn_db, default_night_date(local_now()))
+    d = default_night_date(local_now())
+    summary = night_summary(conn_db, d)
+    attachments: list[tuple[str, bytes, str]] = []
+    pdf_status = None
+    if settings["attach_pdf"]:
+        # A PDF that can't be built must never stop the digest itself: send
+        # the mail anyway and say so in its body.
+        try:
+            from nightreport import build_night_pdf
+            pdf = build_night_pdf(summary, "", local_now(), APP_VERSION)
+            attachments.append((f"backup-notte-{d.isoformat()}.pdf", pdf, "application/pdf"))
+            pdf_status = "attached"
+        except Exception as e:  # noqa: BLE001 - includes ImportError (module/library missing)
+            log.warning("Digest PDF not attached: %s", e)
+            pdf_status = "failed"
+    subject, text, html = build_digest(conn_db, d, summary, pdf_status)
     if test:
         subject = "[PROVA] " + subject
-    send_email(subject, text, html, recipients, mode=settings["mode"], **smtp_kwargs)
+    send_email(subject, text, html, recipients, mode=settings["mode"],
+               attachments=attachments, **smtp_kwargs)
     return subject
 
 

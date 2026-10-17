@@ -28,7 +28,7 @@ DB_PATH = os.environ.get("DB_PATH", "/state/reports.db")
 
 # Bump on every release: shown in the dashboard so "which code is the
 # container actually running?" never needs a trip to the server again.
-APP_VERSION = "2026.10.13-3"
+APP_VERSION = "2026.10.13-4"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS reports (
@@ -379,6 +379,7 @@ def digest_settings(conn: sqlite3.Connection) -> dict:
         "recipients": meta_get(conn, "digest_recipients", ""),
         "time": meta_get(conn, "digest_time", "07:00"),
         "mode": meta_get(conn, "digest_smtp_mode", "starttls"),
+        "attach_pdf": meta_get(conn, "digest_attach_pdf", "1") == "1",
         "last_sent_date": meta_get(conn, "digest_last_sent_date", ""),
         "last_sent_at": meta_get(conn, "digest_last_sent_at", ""),
         "last_error": meta_get(conn, "digest_last_error", ""),
@@ -403,7 +404,10 @@ def validate_digest_settings(data: dict) -> tuple[Optional[dict], str]:
     mode = str(data.get("mode") or "starttls")
     if mode not in DIGEST_MODES:
         return None, "Modalità SMTP non valida."
-    return {"enabled": enabled, "recipients": recipients, "time": t, "mode": mode}, ""
+    # the PDF is attached unless explicitly switched off
+    attach_pdf = bool(data.get("attach_pdf", True))
+    return {"enabled": enabled, "recipients": recipients, "time": t, "mode": mode,
+            "attach_pdf": attach_pdf}, ""
 
 
 def save_digest_settings(conn: sqlite3.Connection, clean: dict) -> None:
@@ -411,3 +415,4 @@ def save_digest_settings(conn: sqlite3.Connection, clean: dict) -> None:
     meta_set(conn, "digest_recipients", ", ".join(clean["recipients"]))
     meta_set(conn, "digest_time", clean["time"])
     meta_set(conn, "digest_smtp_mode", clean["mode"])
+    meta_set(conn, "digest_attach_pdf", "1" if clean.get("attach_pdf", True) else "0")

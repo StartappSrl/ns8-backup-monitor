@@ -265,6 +265,7 @@
     <h2>Riepilogo email giornaliero</h2>
     <p class="dlg-help">Ogni giorno all'orario indicato arriva per email l'elenco dei clienti critici, in attenzione e mancanti nella notte appena conclusa.</p>
     <label class="dlg-row"><input type="checkbox" id="digestEnabled"> Abilita l'invio automatico</label>
+    <label class="dlg-row"><input type="checkbox" id="digestAttach" checked> Allega il report PDF completo della notte</label>
     <label class="dlg-field">Destinatari <small>(separati da virgola, massimo 10)</small>
       <input type="text" id="digestRecipients" placeholder="nome@azienda.it, altro@azienda.it">
     </label>
@@ -701,6 +702,7 @@
       $('digestRecipients').value = s.recipients || '';
       $('digestTime').value = s.time || '07:00';
       $('digestMode').value = s.mode || 'starttls';
+      $('digestAttach').checked = s.attach_pdf !== false;
       const bits = [`Invio da ${s.from || '?'} tramite ${s.smtp_host || '?'}`];
       if(s.last_sent_at) bits.push(`ultimo invio: ${s.last_sent_at.replace('T', ' ').slice(0, 16)}`);
       if(s.last_error) bits.push(`ultimo errore: ${s.last_error}`);
@@ -722,6 +724,7 @@
       recipients: $('digestRecipients').value,
       time: $('digestTime').value,
       mode: $('digestMode').value,
+      attach_pdf: $('digestAttach').checked,
     });
     async function saveDigest(){
       const s = await digestRequest('/api/digest-settings', 'POST', readForm());

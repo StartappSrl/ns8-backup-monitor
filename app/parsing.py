@@ -756,54 +756,99 @@ def parse_eml_bytes(raw_bytes: bytes, source: str) -> list[dict[str, Any]]:
     ]
 
 
-_LOG_LINE_START_RE = re.compile(
-    r"^(\d+)\s+(info|error|warn|warning|debug)\s+(\S+\s+\S+)\s+(.*)$",
+# The "Backup Logs" table of a 1Backup/CoreTech PDF has four columns:
+#
+#     No.  |  Type  |  Timestamp           |  Log
+#     35   |  info  |  2026/09/17 23:16:50 |  [S3CompatibleService...] Retry after ...
+#
+# Type is "info", "start", "warn", "error"... and it is the column that says
+# what a row IS, so it - not a keyword hidden somewhere in the message - decides
+# what must be shown. A Type of "error" (or a cut-off "erro") is always shown,
+# as its Timestamp and Log columns (3rd and 4th).
+_LOG_ENTRY_RE = re.compile(
+    r"^(\d+)\s+([A-Za-z]+)\s+(\d{4}[/-]\d{2}[/-]\d{2}\s+\d{2}:\d{2}:\d{2})(?:\s+(.*))?$"
+)
+# page furniture that PDF text extraction drops into the middle of the table
+_LOG_NOISE_RE = re.compile(
+    r"^(No\.\s+Type\s+Timestamp\s+Log|1999-\d{4}\s*\(C\)\s*CoreTech.*|Page\s+\d+(\s+of\s+\d+)?)$",
     re.IGNORECASE,
 )
+# The PDF hard-wraps a long log message at the cell width (~160 characters),
+# splitting words and paths wherever the width runs out ("SpoolA" / "rea").
+# A physical line at least this long was therefore cut by the wrap, not ended
+# by the writer, and its continuation must be glued on with NO added space.
+_LOG_FULL_LINE = 120
+# Only used for rows whose Type is not "error": problem lines the tool logs as
+# plain "info" (retries, timeouts, failed uploads).
 _LOG_INTERESTING_KEYS = [
     "error", "fail", "warn", "exception", "timeout", "denied", "retry",
     "could not", "unable", "corrupt",
 ]
 
 
-def extract_log_excerpt(raw_text: str, max_chars: int = 2000) -> str:
-    """Pull out the 'interesting' (non-routine) lines from the numbered
-    "Backup Logs" table found in 1Backup/CoreTech PDF reports - the
-    detailed retry/timeout/error lines that never appear anywhere else
-    in the report (the header fields only carry a short overall status
-    like "OK" or "Storage Quota Exceeded", not the underlying cause).
-
-    PDF text extraction wraps a single logical log line across several
-    physical text lines mid-sentence (e.g. a long exception message), so
-    this reassembles each numbered entry (recognized by its "N info/
-    error/warn TIMESTAMP ..." prefix) before filtering, rather than
-    filtering line-by-line - otherwise a wrapped continuation line with
-    no prefix of its own would be silently dropped even if the entry it
-    belongs to is relevant.
-    """
+def parse_backup_log_entries(raw_text: str) -> list[dict[str, str]]:
+    """The rows of the "Backup Logs" table as {no, type, time, msg} dicts,
+    with wrapped messages put back together."""
     m = re.search(r"Backup Logs\b(.*?)(?:\nBackup Files\b|\Z)", raw_text, re.DOTALL)
     if not m:
-        return ""
-    section = m.group(1)
-
-    entries: list[str] = []
-    current: Optional[str] = None
-    for line in section.split("\n"):
-        line = line.rstrip()
-        if not line.strip():
+        return []
+    entries: list[dict[str, str]] = []
+    current: Optional[dict[str, str]] = None
+    last_line = ""
+    for raw in m.group(1).split("\n"):
+        line = raw.rstrip("\r")
+        if not line.strip() or _LOG_NOISE_RE.match(line.strip()):
             continue
-        start_match = _LOG_LINE_START_RE.match(line.strip())
-        if start_match:
-            if current:
-                entries.append(current)
-            current = start_match.group(0)
+        start = _LOG_ENTRY_RE.match(line.lstrip())
+        if start:
+            current = {"no": start.group(1), "type": start.group(2),
+                       "time": start.group(3), "msg": start.group(4) or ""}
+            entries.append(current)
         elif current is not None:
-            current = current.rstrip() + " " + line.strip()
-    if current:
-        entries.append(current)
+            # raw concatenation: a space that sits exactly on the wrap point is
+            # preserved by the extractor, a mid-word break stays mid-word
+            current["msg"] += ("" if len(last_line) >= _LOG_FULL_LINE else " ") + line
+        last_line = line
+    for e in entries:
+        e["msg"] = re.sub(r"\s+", " ", e["msg"]).strip()
+    return entries
 
-    interesting = [e for e in entries if any(k in e.lower() for k in _LOG_INTERESTING_KEYS)]
-    text = "\n".join(re.sub(r"\s+", " ", e).strip() for e in interesting)
+
+def extract_log_excerpt(raw_text: str, max_chars: int = 4000) -> str:
+    """The log rows worth showing, as "<timestamp>  <message>" - the 3rd and
+    4th columns of the "Backup Logs" table.
+
+    1. Rows whose Type (2nd column) is "error" - or the cut-off "erro" - come
+       first and are always included, whatever their message says (a row
+       like "Storage Quota Exceeded" contains none of the usual keywords).
+    2. Then rows of Type "warn", and rows of any other Type whose message
+       contains a problem keyword (the retry/timeout/failed-upload lines this
+       tool writes as plain "info").
+
+    Errors go first so that, when a long run of retries fills the limit, it is
+    the retries that get cut and not the error that explains them.
+    """
+    entries = parse_backup_log_entries(raw_text)
+    if not entries:
+        return ""
+
+    def is_error(e) -> bool:
+        return e["type"].lower().startswith("erro")
+
+    def is_relevant(e) -> bool:
+        return e["type"].lower().startswith("warn") or any(k in e["msg"].lower() for k in _LOG_INTERESTING_KEYS)
+
+    def fmt(e) -> str:
+        return f"{e['time']}  {e['msg']}".rstrip()
+
+    errors = [fmt(e) for e in entries if is_error(e)]
+    others = [fmt(e) for e in entries if not is_error(e) and is_relevant(e)]
+    lines = list(errors)
+    if others:
+        if errors:
+            lines.append("— altre righe rilevanti —")
+        lines += others
+    text = "\n".join(lines)
     if len(text) > max_chars:
         text = text[:max_chars].rstrip() + "…"
     return text

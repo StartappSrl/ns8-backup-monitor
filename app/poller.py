@@ -235,8 +235,8 @@ def run_cycle(conn_db: sqlite3.Connection) -> dict:
                         INSERT INTO reports (
                             natural_key, source, sender, timestamp, user, backup_set,
                             destination, status, data_size, ip_address,
-                            start_end, job_id, severity, log_excerpt
-                        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                            start_end, job_id, severity, log_excerpt, log_summary
+                        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                         ON CONFLICT(natural_key) DO UPDATE SET
                             source=excluded.source,
                             sender=excluded.sender,
@@ -250,7 +250,8 @@ def run_cycle(conn_db: sqlite3.Connection) -> dict:
                             start_end=excluded.start_end,
                             job_id=excluded.job_id,
                             severity=excluded.severity,
-                            log_excerpt=excluded.log_excerpt
+                            log_excerpt=excluded.log_excerpt,
+                            log_summary=excluded.log_summary
                         """,
                         (
                             rec["natural_key"], rec["source"], sender_email, rec["timestamp"],
@@ -258,6 +259,7 @@ def run_cycle(conn_db: sqlite3.Connection) -> dict:
                             rec["status"], rec["data_size"], rec["ip_address"],
                             rec["start_end"], rec["job_id"], rec["severity"],
                             rec.get("log_excerpt", ""),
+                            rec.get("log_summary", ""),
                         ),
                     )
 

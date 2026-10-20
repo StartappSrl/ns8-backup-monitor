@@ -28,7 +28,7 @@ DB_PATH = os.environ.get("DB_PATH", "/state/reports.db")
 
 # Bump on every release: shown in the dashboard so "which code is the
 # container actually running?" never needs a trip to the server again.
-APP_VERSION = "2026.10.13-5"
+APP_VERSION = "2026.10.13-6"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS reports (
@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS reports (
     job_id      TEXT,
     severity    TEXT,
     log_excerpt TEXT,
+    log_summary TEXT,
     received_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS processed_messages (
@@ -83,6 +84,7 @@ CREATE TABLE IF NOT EXISTS trusted_devices (
 _REPORTS_MIGRATIONS = [
     "ALTER TABLE reports ADD COLUMN sender TEXT",
     "ALTER TABLE reports ADD COLUMN log_excerpt TEXT",
+    "ALTER TABLE reports ADD COLUMN log_summary TEXT",
 ]
 
 

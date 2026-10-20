@@ -528,7 +528,7 @@ def _clean_key_part(s: str) -> str:
 
 def _to_record(fields: dict[str, str], source: str, extra_id: str,
                subj_parsed: Optional[dict[str, str]],
-               log_excerpt: str = "") -> dict[str, Any]:
+               log_excerpt: str = "", log_summary: str = "") -> dict[str, Any]:
     status = fields.get("Job Status") or (subj_parsed or {}).get("status", "") or ""
     start_end = fields.get("Start - End", "")
     raw_timestamp = (
@@ -553,6 +553,7 @@ def _to_record(fields: dict[str, str], source: str, extra_id: str,
         "job_id": fields.get("Backup Job") or (subj_parsed or {}).get("jobId", "") or "",
         "severity": classify_severity(status),
         "log_excerpt": log_excerpt,
+        "log_summary": log_summary,
     }
 
 
@@ -854,6 +855,156 @@ def extract_log_excerpt(raw_text: str, max_chars: int = 4000) -> str:
     return text
 
 
+# -- plain-language summary of the log ---------------------------------------
+#
+# The raw log rows are what a support ticket needs, but not what someone
+# scanning the dashboard wants to read. summarize_backup_log() turns them into
+# a few sentences: WHAT went wrong, HOW OFTEN and WHEN - only from what the log
+# actually says (counts, times, file names), never guessing an outcome. Rules
+# are ordered cause-first (a "Retry ... SocketTimeoutException" line is a
+# timeout, whatever else it mentions). Anything unrecognised that the log marks
+# as an error/warning is quoted verbatim, so it can never vanish inside a
+# reassuring sentence.
+_SUMMARY_RULES: list[tuple[str, "re.Pattern[str]"]] = [
+    (key, re.compile(pat, re.IGNORECASE)) for key, pat in [
+        ("timeout", r"SocketTimeout|timed[ -]?out|timeout"),
+        ("connection", r"connection (refused|reset|aborted|closed)|UnknownHost|no route to host|"
+                       r"network is unreachable|unable to connect|could not resolve|name or service not known"),
+        ("ssl", r"SSLHandshake|PKIX|certificate"),
+        ("auth", r"authenticat|login failed|invalid credentials|unauthori[sz]ed|not authori[sz]ed|"
+                 r"InvalidAccessKeyId|SignatureDoesNotMatch|invalid (access|secret) key"),
+        ("denied", r"access (is )?denied|permission denied"),
+        ("quota", r"quota"),
+        ("disk", r"no space left|not enough (disk )?space|disk full|insufficient (disk )?space"),
+        ("locked", r"being used by another process|sharing violation|file is locked"),
+        ("vss", r"\bVSS\b|shadow copy"),
+        ("license", r"licen[sc]e"),
+        ("corrupt", r"corrupt"),
+        ("notfound", r"cannot find|no such file|file not found|path not found|does not exist"),
+        ("running", r"is still running"),
+        ("upload", r"Failed to upload file"),
+    ]
+]
+_SUMMARY_LABELS = {
+    "timeout": "Timeout di rete{s3} (la destinazione non ha risposto in tempo)",
+    "connection": "Connessione alla destinazione non riuscita (rifiutata, interrotta o host non raggiungibile)",
+    "ssl": "Errore di certificato o di connessione sicura (SSL)",
+    "auth": "Autenticazione rifiutata dalla destinazione (credenziali o chiavi non valide)",
+    "denied": "Accesso negato a file o cartelle (permessi insufficienti)",
+    "quota": "Quota di archiviazione superata",
+    "disk": "Spazio su disco insufficiente",
+    "locked": "File in uso da un altro processo, non leggibile",
+    "vss": "Problema con il Volume Shadow Copy (VSS) di Windows",
+    "license": "Problema di licenza",
+    "corrupt": "File o dati danneggiati",
+    "notfound": "File o percorso non trovato",
+    "running": "Backup saltato: il set{set} era ancora in esecuzione (job precedente non terminato)",
+    "upload": "Upload non riuscito",
+}
+MAX_SUMMARY_LINES = 6
+MAX_OTHER_KINDS = 3
+
+
+def _log_range(first: str, last: str) -> str:
+    """"alle 23:16" / "tra 23:16 e 00:07" (with the date when it crosses midnight)."""
+    ft, lt = first[11:16], last[11:16]
+    if first[:10] == last[:10] and ft == lt:
+        return f"alle {ft}"
+    if first[:10] != last[:10]:
+        lt = f"{last[8:10]}/{last[5:7]} {lt}"
+    return f"tra {ft} e {lt}"
+
+
+def _plural(n: int, one: str, many: str) -> str:
+    return f"{n} {one if n == 1 else many}"
+
+
+def summarize_backup_log(entries: list[dict[str, str]]) -> str:
+    """A few plain-Italian lines describing the problems in the log rows, or ""
+    when there is nothing to report."""
+    groups: dict[str, list[dict[str, str]]] = {}
+    others: dict[str, list[dict[str, str]]] = {}
+    for e in entries:
+        msg = e["msg"]
+        is_error = e["type"].lower().startswith("erro")
+        relevant = (is_error or e["type"].lower().startswith("warn")
+                    or any(k in msg.lower() for k in _LOG_INTERESTING_KEYS))
+        key = next((k for k, rx in _SUMMARY_RULES if rx.search(msg)), None)
+        if key == "running":
+            relevant = True            # not an error word, but it is why a backup was skipped
+        if not relevant:
+            continue
+        if key:
+            groups.setdefault(key, []).append(e)
+        else:
+            others.setdefault(re.sub(r"\d+", "N", msg)[:100], []).append(e)
+
+    lines: list[tuple[int, int, str]] = []   # (has_error_row, count, text)
+    for key, items in groups.items():
+        n, rng = len(items), _log_range(items[0]["time"], items[-1]["time"])
+        has_err = int(any(i["type"].lower().startswith("erro") for i in items))
+        label = _SUMMARY_LABELS[key]
+        if key == "timeout":
+            label = label.format(s3=" verso lo storage S3" if any("S3" in i["msg"] for i in items) else "")
+            retries = [i for i in items if re.search(r"Retry after", i["msg"])]
+            series = sum(1 for i in retries if re.search(r"count #1\b", i["msg"]))
+            if retries:
+                detail = f"{_plural(len(retries), 'tentativo fallito', 'tentativi falliti')}"
+                if series:
+                    detail += f" in {_plural(series, 'serie', 'serie')}"
+                detail += f", {rng}"
+                if len(items) > len(retries):
+                    detail += f" (più {_plural(len(items) - len(retries), 'altra segnalazione', 'altre segnalazioni')})"
+            else:
+                detail = f"{_plural(n, 'segnalazione', 'segnalazioni')}, {rng}"
+        elif key == "upload":
+            files = []
+            for i in items:
+                m = re.search(r'Failed to upload file "([^"]+)"', i["msg"])
+                name = m.group(1).rsplit("/", 1)[-1] if m else ""
+                if name and name not in files:
+                    files.append(name)
+            tries = []
+            for i in items:
+                m = re.search(r"# of retry: (\d+)/(\d+)", i["msg"])
+                if m:
+                    tries.append((int(m.group(1)), int(m.group(2))))
+            shown = ", ".join(files[:3]) + (f" e altri {len(files) - 3}" if len(files) > 3 else "")
+            detail = f"{_plural(len(files) or n, 'file', 'file')}" + (f" ({shown})" if files else "")
+            if tries:
+                top = max(tries)
+                detail += f", riprovato fino al tentativo {top[0]}/{top[1]}"
+            detail += f", {rng}"
+        elif key == "running":
+            sets = []
+            for i in items:
+                m = re.search(r'set "([^"]+)"', i["msg"])
+                if m and m.group(1) not in sets:
+                    sets.append(m.group(1))
+            lines.append((has_err, n, f"{label.format(set=f' \"{sets[0]}\"' if len(sets) == 1 else '')}, {rng}."))
+            continue
+        else:
+            detail = f"{_plural(n, 'segnalazione', 'segnalazioni')}, {rng}"
+        lines.append((has_err, n, f"{label}: {detail}."))
+
+    kinds = sorted(others.values(), key=lambda v: (-int(any(i["type"].lower().startswith("erro") for i in v)), -len(v)))
+    for items in kinds[:MAX_OTHER_KINDS]:
+        first = items[0]["msg"]
+        quoted = first if len(first) <= 160 else first[:159].rstrip() + "…"
+        extra = f" ({_plural(len(items), 'segnalazione', 'segnalazioni')}, {_log_range(items[0]['time'], items[-1]['time'])})"
+        lines.append((int(any(i["type"].lower().startswith("erro") for i in items)), len(items),
+                      f"Messaggio del log: «{quoted}»{extra}."))
+    if len(kinds) > MAX_OTHER_KINDS:
+        lines.append((0, 0, f"…e altri {len(kinds) - MAX_OTHER_KINDS} tipi di messaggio non classificati."))
+
+    lines.sort(key=lambda t: (-t[0], -t[1]))
+    return "\n".join(t[2] for t in lines[:MAX_SUMMARY_LINES])
+
+
+def extract_log_summary(raw_text: str) -> str:
+    return summarize_backup_log(parse_backup_log_entries(raw_text))
+
+
 def parse_pdf_bytes(raw_bytes: bytes, source: str) -> list[dict[str, Any]]:
     """Parse a PDF attachment's text into a list of report records."""
     try:
@@ -876,8 +1027,9 @@ def parse_pdf_bytes(raw_bytes: bytes, source: str) -> list[dict[str, Any]]:
     full_text = unicodedata.normalize("NFC", "\n".join(lines))
     blocks = extract_records_from_text(full_text)
     log_excerpt = extract_log_excerpt(full_text)
+    log_summary = extract_log_summary(full_text)
     return [
-        _to_record(fields, source, str(idx), None, log_excerpt=log_excerpt)
+        _to_record(fields, source, str(idx), None, log_excerpt=log_excerpt, log_summary=log_summary)
         for idx, fields in enumerate(blocks)
     ]
 
@@ -921,6 +1073,8 @@ def parse_email_message(raw_bytes: bytes, source: str) -> list[dict[str, Any]]:
     safe speedup with no loss of anything the dashboard actually shows.
     """
     records = parse_eml_bytes(raw_bytes, source)
+    for r in records:
+        r.setdefault("log_summary", "")      # only PDF-derived logs have one
 
     if not any(r["severity"] in ("WARNING", "CRITICAL") for r in records):
         return records
@@ -949,6 +1103,8 @@ def parse_email_message(raw_bytes: bytes, source: str) -> list[dict[str, Any]]:
                 if existing is not None:
                     if not existing.get("log_excerpt") and r.get("log_excerpt"):
                         existing["log_excerpt"] = r["log_excerpt"]
+                    if not existing.get("log_summary") and r.get("log_summary"):
+                        existing["log_summary"] = r["log_summary"]
                 elif r["severity"] in ("WARNING", "CRITICAL"):
                     # An unmatched PDF record with a genuine problem is a
                     # real destination the HTML body didn't mention at
